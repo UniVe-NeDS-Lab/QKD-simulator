@@ -10,6 +10,8 @@ import multiprocessing
 import time
 import os
 
+#from qber import FSOQKD
+
 rural_list = ['visibility_graphs/rural1/', 'visibility_graphs/rural2/', 
                'visibility_graphs/rural3/']
 
@@ -25,6 +27,8 @@ parser.add_argument('--graph_size', type=int, default=30)
 parser.add_argument('--no_bootstrap', action='store_true', default=False)
 parser.add_argument('--no_save', action='store_true', default=False)
 parser.add_argument('--seed', type=int)
+parser.add_argument('--max_len', type=int, help='Maximum link length', 
+                    default = 0)
 parser.add_argument('--results_folder', default='./results/')
 
 args = parser.parse_args()
@@ -45,11 +49,20 @@ def distance(p1, p2):
     x2,y2 = p2
     return ((x1-x2)**2 + (y1-y2)**2)**0.5
 
-def MDRW(adj_list_file, sample_size, ngraphs=1, use_cent=False, save_to=''):
+def MDRW(adj_list_file, sample_size, coord_dict, ngraphs=1, 
+         use_cent=False, save_to=''):
     """ multi-dimensional random walk, with an optional variant to use 
         eigenvector centrality to tune the probabilities """
     core_nodes = 5
     g = nx.read_adjlist(adj_list_file, delimiter=',')
+    
+    def filter_edge(frm, to):
+        return distance(coord_dict[int(frm)], 
+                        coord_dict[int(to)]) < args.max_len
+    
+    if args.max_len:
+        g = nx.subgraph_view(g, filter_edge=filter_edge)
+        
     tot_cent = 0
     c_dict = {}
 
@@ -130,11 +143,11 @@ def process_folder(folder, runs=5000, size=30, fname=''):
     except OSError:
         pass
     count = 0
-    for g in MDRW(adj_file, size, runs):
-        for (frm, to , data) in g.edges(data=True):
+    for g in MDRW(adj_file, size, coord_dict, runs):
+        for frm, to, data in g.edges(data=True):
             data['length'] = distance(coord_dict[int(frm)], 
-                                      coord_dict[int(to)])
-        edges.extend([data['length'] for _, _, data in g.edges(data=True)])
+                                      coord_dict[int(to)]) 
+            edges.append(data['length'])
         nodes.extend(g.nodes())
         if not args.no_save:
             nx.write_graphml(g, save_folder + '/'  + fname + str(count) + \
@@ -144,6 +157,7 @@ def process_folder(folder, runs=5000, size=30, fname=''):
     return edges
 
 def fit_length(edges, fname):
+    txrate  = 100_000_000 # 
     print('Fitting the data for', fname)
     d = distfit()
     if no_bootstrap:
@@ -168,21 +182,30 @@ def fit_length(edges, fname):
         pfile.write('\n\n')
         # add some initial x values to make all the fitted curves start from 10
         x = list(range(10,int(x[0]),20)) + list(res['histdata'][1])
-        pfile.write('# length, fitted \n')
+        pfile.write('# length, fitted\n')
         pfile.write(f'# {res["model"]["name"]} (params[] loc, scale) '
                     f'{res["model"]["params"]} '
                     f'mean={res["model"]["model"].mean()}\n')
         for i in range(len(x)):
-            pfile.write(f'{x[i]} {func(x[i])}\n')
-            
+            pfile.write(f'{x[i]} {func(x[i])} \n')
+        
+        pfile.write('\n\n')
+        
+        #pfile.write(f'# lSKR-@{txrate/1000000000}GHz (mb/s), '
+        #            'probability\n')
+        #dist_f = FSOQKD().get_rate
+        #skr = [dist_f(l, txrate)[3]/1000_000 for l in d.generate(100000) if l >1]
+        #y, x = np.histogram(skr, bins=1000)
+        #for i in range(len(y)):
+        #    pfile.write(f'{x[i]+1} {y[i]}\n') 
             
 runs = args.runs
 size = args.graph_size
 no_bootstrap = args.no_bootstrap
 fit_processes = []
 
-for area in [rural_list]:#, suburban_list, urban_list]:
-#for area in [rural_list, suburban_list, urban_list]:
+#for area in [rural_list]:#, suburban_list, urban_list]:
+for area in [rural_list, suburban_list, urban_list]:
     edges = []
     pool = multiprocessing.Pool(processes=3)
     arguments = []

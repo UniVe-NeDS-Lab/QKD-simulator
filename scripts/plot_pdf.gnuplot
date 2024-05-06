@@ -3,6 +3,7 @@ set output 'rural.pdf'
 set title "Rural scenario"
 
 #set logscale x
+#set logscale y
 
 data_folder='../results/'
 
@@ -26,3 +27,10 @@ plot data_folder.'rural-data.gnuplot' i 0 u 1:2 w boxes lc rgb "#00FF0000" title
      data_folder.'rural-data.gnuplot' i 1 u 1:2 w lines title "Rural Areas" lc "red" lw 4, \
      data_folder.'suburban-data.gnuplot' i 1 u 1:2 w lines title "Suburban Areas" lc "blue" lw 4,\
      data_folder.'urban-data.gnuplot' i 1 u 1:2 w lines title "Urban Areas" lc "green" lw 4, \
+
+#set output 'keyrate-summary.pdf'
+#plot data_folder.'rural-data.gnuplot' i 2 u 1:2 w  boxes t 'rural',\
+#     data_folder.'suburban-data.gnuplot' i 2 u 2:3 w l title 'suburban',\
+#     data_folder.'urban-data.gnuplot' i 2 u 2:3 w l title 'urban'
+
+
