@@ -1,4 +1,3 @@
-# use this to convert .adj files into edgelist with annotated distances
   
 from distfit import distfit
 import numpy as np
@@ -9,6 +8,7 @@ import argparse
 import multiprocessing
 import time
 import os
+import glob
 
 #from qber import FSOQKD
 
@@ -31,6 +31,7 @@ parser.add_argument('--max_len', type=int, help='Maximum link length',
                     default = 0)
 parser.add_argument('--results_folder', default='./results/')
 
+
 args = parser.parse_args()
 
 
@@ -43,6 +44,7 @@ if args.seed is not None:
     np.random.seed(args.seed)
     np.random.default_rng(args.seed)
     print(f'Set random seed to {args.seed}')
+
 
 def distance(p1, p2):
     x1,y1 = p1
@@ -118,10 +120,9 @@ def MDRW(adj_list_file, sample_size, coord_dict, ngraphs=1,
     
     print('Done with graph sampling')
     return graphs
-    
 
 
-def process_folder(folder, runs=5000, size=30, fname=''):
+def gen_graphs(folder, runs=5000, size=30, fname='', gnumber=0):
     adj_file = folder + "/intervisibility.adj" 
     position_file  = folder + "/best_p.csv"
     print('Opening folder:', folder)
@@ -150,14 +151,13 @@ def process_folder(folder, runs=5000, size=30, fname=''):
             edges.append(data['length'])
         nodes.extend(g.nodes())
         if not args.no_save:
-            nx.write_graphml(g, save_folder + '/'  + fname + str(count) + \
-                         '.graphml')
+            nx.write_graphml(g, save_folder + f'/{fname}-{gnumber}-{str(count)}.graphml')
         count += 1
     print("Sub graph density:", len(edges)/len(nodes))
+
     return edges
 
 def fit_length(edges, fname):
-    txrate  = 100_000_000 # 
     print('Fitting the data for', fname)
     d = distfit()
     if no_bootstrap:
@@ -190,35 +190,52 @@ def fit_length(edges, fname):
             pfile.write(f'{x[i]} {func(x[i])} \n')
         
         pfile.write('\n\n')
-        
-        #pfile.write(f'# lSKR-@{txrate/1000000000}GHz (mb/s), '
-        #            'probability\n')
-        #dist_f = FSOQKD().get_rate
-        #skr = [dist_f(l, txrate)[3]/1000_000 for l in d.generate(100000) if l >1]
-        #y, x = np.histogram(skr, bins=1000)
-        #for i in range(len(y)):
-        #    pfile.write(f'{x[i]+1} {y[i]}\n') 
+    
             
 runs = args.runs
 size = args.graph_size
 no_bootstrap = args.no_bootstrap
 fit_processes = []
 
+
 #for area in [rural_list]:#, suburban_list, urban_list]:
-for area in [rural_list, suburban_list, urban_list]:
-    edges = []
-    pool = multiprocessing.Pool(processes=3)
-    arguments = []
-    for folder in area:
-        fname = ''.join(folder.split('/')[-2][:-1])
-        arguments.append([folder, runs, size, fname])
-    for e in pool.starmap(process_folder, arguments):
-        edges.extend(e)
-        print('Received', len(edges), 'edges')
-    print('All workers provided edges')
-    p = multiprocessing.Process(target=fit_length, args=(edges, fname,))
-    p.start()
-    fit_processes.append(p)
+
+if not runs: # do not regenerate the graphs, use the existing ones
+    for area in ['rural', 'suburban', 'urban']:
+        edges = []
+        nodes = 0
+        graphs_folder = args.results_folder + 'graphs'
+        file_list = glob.glob(f'{graphs_folder}/{area}*.graphml')
+        if not file_list:
+            print(f'I could not find files for the {area} areas in {graphs_folder}. Please generate them')
+            exit()
+        print(f'Using {len(file_list)} existing graphs for {area} areas ', end='')
+        # Open and read each file
+        for file_name in file_list:
+            with open(file_name, 'r') as f:
+                g = nx.read_graphml(f)
+                nodes += len(g)
+                edges.extend(g.edges())
+        print(f'containing {len(edges)} edges and {nodes} nodes')
+        p = multiprocessing.Process(target=fit_length, args=(edges, area,))
+        p.start()
+else:
+    for area in [rural_list, suburban_list, urban_list]:
+        edges = []
+        pool = multiprocessing.Pool(processes=3)
+        arguments = []
+        gnumber = 0
+        for folder in area:
+            fname = ''.join(folder.split('/')[-2][:-1])
+            arguments.append([folder, int(runs/len(area)), size, fname, gnumber])
+            gnumber += 1
+        for e in pool.starmap(gen_graphs, arguments):
+            edges.extend(e)
+            print('Received', len(edges), 'edges')
+        print('All workers provided edges')
+        p = multiprocessing.Process(target=fit_length, args=(edges, fname,))
+        p.start()
+        fit_processes.append(p)
 for p in fit_processes:
     p.join()
     

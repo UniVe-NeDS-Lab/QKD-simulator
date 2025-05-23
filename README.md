@@ -10,7 +10,7 @@ This will generate a './results/' folder containing:
  -  9 files, for each of the scenario you will have one .csv file that reports the results of the distfit Python package, a .png with the graphical representation of the pdf, and a .gnuplot file with data ready to be plotted.
  - all the generated (10000!) graphs in the .graphml format
 
-3) move to the scripts folder and launch gnuplot plot_pdf.gnuplot. This will recreate the graph of the paper
+3) move to the scripts folder and launch gnuplot plot_pdf.gnuplot. This will recreate the graph of the paper. Note however that Networkx seems to save graphs in .graphml format in a non-deterministic way, so the graphs are isomorphic but the actual file may differ.
 
 
 If you just want to just reuse the probability distrbutions, scripts/replot.py file shows how to regenerate the PDF functions.

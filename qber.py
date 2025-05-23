@@ -137,9 +137,9 @@ if __name__ == '__main__':
     y_old = []
     y_new = []
     df = pd.DataFrame()
-    tx_rate = 1000_000_000
+    tx_rate = 6_000_000_000
     new_f = FSOQKD()
-    for distance in np.arange(100, 3000, 100):
+    for distance in np.arange(10, 1000, 10):
         x.append(distance)
         new_func_res = new_f.get_rate(distance, tx_rate)
         y_new.append(new_func_res[3]/1000_000)
