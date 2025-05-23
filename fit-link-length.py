@@ -215,7 +215,7 @@ if not runs: # do not regenerate the graphs, use the existing ones
             with open(file_name, 'r') as f:
                 g = nx.read_graphml(f)
                 nodes += len(g)
-                edges.extend(g.edges())
+                edges.extend([e['length'] for _,_,e in g.edges(data=True)])
         print(f'containing {len(edges)} edges and {nodes} nodes')
         p = multiprocessing.Process(target=fit_length, args=(edges, area,))
         p.start()
