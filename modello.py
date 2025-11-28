@@ -20,6 +20,8 @@ nodes = 10
 
 rhos = np.array([1.0]*(nodes-1))
 
+
+# this assumes 
 gammas = [1.0]*(nodes-1)
 
 
@@ -36,14 +38,14 @@ for i in range(0, nodes):
 #for i in range(0,nodes-1):
 #    pij[i][nodes-1] = 1.0
     
-    
+
 ltot = 4.0
 
 # what is psi??
 
 def psi(i, rhos, lamb):
     t = 0.0
-    for k in range(0, i+1):
+    for k in range(0, i+1): 
         for j in range(i+1, nodes):
             fact  = 1.0
             for f in range(k,i):
@@ -72,6 +74,7 @@ alpha = 0.1
 while (LA.norm(oldrho-rhos,2)>0.000001):
     print(LA.norm(oldrho-rhos,2))
     oldrho = np.copy(rhos)
+    # I am not sure how to generalize this
     for i in range(0,nodes-1):
         rhos[i] = alpha * min(1.0, gammas[i]/psi(i, oldrho, lambij)) + (1-alpha)*oldrho[i]
 

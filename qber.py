@@ -31,7 +31,7 @@ class FSOQKD():
 
      
     def get_rate(self, d, tx_rate):
-        """ distance in m """   
+        """ distance in m, tx_rate in photons/s, returns b/s """   
         self.responsivity = self.eta_q*(self.wave_lambda*1e6)/1.23985 # FIXME make this number a parameter
         self.s_gain = (math.pi*self.ts_diameter/self.wave_lambda)**2
         self.d_gain = (math.pi*self.td_diameter/self.wave_lambda)**2
@@ -138,13 +138,15 @@ if __name__ == '__main__':
     y_new = []
     df = pd.DataFrame()
     tx_rate = 6_000_000_000
+    tx_rate = 1
     new_f = FSOQKD()
     for distance in np.arange(10, 1000, 10):
         x.append(distance)
         new_func_res = new_f.get_rate(distance, tx_rate)
         y_new.append(new_func_res[3]/1000_000)
-    plt.plot(x, y_new)
-    plt.ylabel('bit-rate [mb/s]')
+        y_old.append(new_func_res[2]/1000_000)
+    plt.plot(x, y_new, x, y_old)
+    plt.ylabel('bit-rate [Mb/s]')
     plt.xlabel('distance [m]')
     plt.yscale('log')
     plt.show()

@@ -14,3 +14,5 @@ This will generate a './results/' folder containing:
 
 
 If you just want to just reuse the probability distrbutions, scripts/replot.py file shows how to regenerate the PDF functions.
+
+If you want to just generate the graphs, use --gen_only, this will generate graphs annotated with edge length and BER over the edge. Multiply per photon generation rate and you will get the Secret Key Rate.
