@@ -49,11 +49,11 @@ class LinkRate(LinkProperties):
         p, fig = plt.subplots()
         fig.set_xscale('log')
         fig.plot(fit_x,fit_y)
-        fig.set_xlabel('Rate bit/s')
+        fig.set_xlabel('Rate Mb/s')
         fig.set_title('Link rate PDF')
         plt.show()
 
 
 if __name__ == "__main__":
-    g = LinkLength(scenario='urban')
+    g = LinkRate(scenario='urban')
     g.plot_pdf()

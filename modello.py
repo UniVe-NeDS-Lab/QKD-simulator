@@ -27,6 +27,7 @@ def create_graph(nodes):
     graph=nx.path_graph(nodes)
     return graph
 
+# what is pij? is it the relative intensity of the key generation process? 
 pij = np.ones((nodes,nodes))*1/(math.pow(nodes,2)-nodes)
 for i in range(0, nodes):
     pij[i][i] = 0.0
@@ -37,6 +38,8 @@ for i in range(0, nodes):
     
     
 ltot = 4.0
+
+# what is psi??
 
 def psi(i, rhos, lamb):
     t = 0.0
@@ -60,9 +63,12 @@ def psi(i, rhos, lamb):
 g=create_graph(nodes)
 
 oldrho = np.array([0]*(nodes-1))
+
+# what is lambij? is it the absolute intensity of the key generation process, that is the prob of successful delivery times the bit-rate?? 
 lambij = ltot * pij
 alpha = 0.1
 
+# this is approximating rho, so eq. 2?
 while (LA.norm(oldrho-rhos,2)>0.000001):
     print(LA.norm(oldrho-rhos,2))
     oldrho = np.copy(rhos)
@@ -72,7 +78,7 @@ while (LA.norm(oldrho-rhos,2)>0.000001):
 fix, ax = plt.subplots()
 ax.plot(range(0,len(rhos)),rhos)
 ax.set_xlabel("Link")
-ax.set_ylabel("Prob. of filled")
+ax.set_ylabel("Prob. of filled") # prob that link i is non empty?
 plt.yscale('log')
 ax.set_title("Model")
 ax.grid()
@@ -80,27 +86,28 @@ ax.legend(loc = 'lower right')
 
 r = []
 l = dict(nx.all_pairs_shortest_path(g))
+# generate a list of routes (in only one direction) for all the nodes in the graph.  
+# why do we skip the last node? seems like an error.
 for k in l:
     for j in l[k]:
-        
-        print(k,"-",j,':',l[k][j])
+        #print(k,"-",j,':',l[k][j])
         if len(l[k][j])>1:
             if l[k][j][0]<l[k][j][1]:
-                r.append(l[k][j][0:-1]) 
-            
-psucc=[1.0]*len(r)            
+                r.append(l[k][j][0:-1]) # [:] should be correct ??
+print(r)   
+psucc=[1.0]*len(r)    # this is the probability of correctly transmitting over a route
 for e in range(0,len(r)):
     for k in r[e]:
-        psucc[e] = psucc[e]*rhos[k]
+        psucc[e] = psucc[e]*rhos[k] # accumulates for every route the prob of every link
     
 dist = defaultdict(list)
 
 for i in range(len(psucc)):
-    dist[len(r[i])].append(psucc[i])
+    dist[len(r[i])].append(psucc[i])  # bin for route length
 
 avg_p = []
 for k in dist:
-    avg_p.append(sum(dist[k])/len(dist[k]))    
+    avg_p.append(sum(dist[k])/len(dist[k]))    # average
   
 
 fix, ax = plt.subplots()
@@ -110,3 +117,4 @@ ax.set_ylabel("Prob. of success")
 ax.set_title("Model")
 ax.grid()
 ax.legend(loc = 'lower right')      
+plt.show()

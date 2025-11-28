@@ -9,8 +9,7 @@ import multiprocessing
 import time
 import os
 import glob
-
-#from qber import FSOQKD
+from qber import FSOQKD
 
 rural_list = ['visibility_graphs/rural1/', 'visibility_graphs/rural2/', 
                'visibility_graphs/rural3/']
@@ -23,6 +22,9 @@ urban_list = ['visibility_graphs/urban1/', 'visibility_graphs/urban2/',
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--runs', type=int, default=10000)
+parser.add_argument('--gen_only', action='store_true', default=False)
+parser.add_argument('--fit_only', action='store_true', default=False)
+parser.add_argument('--freq', type=int, default=1_000_000_000)
 parser.add_argument('--graph_size', type=int, default=30)
 parser.add_argument('--no_bootstrap', action='store_true', default=False)
 parser.add_argument('--no_save', action='store_true', default=False)
@@ -157,24 +159,24 @@ def gen_graphs(folder, runs=5000, size=30, fname='', gnumber=0):
 
     return edges
 
-def fit_length(edges, fname):
-    print('Fitting the data for', fname)
+def fit(values, fname, target='length', comments=''):
+    print(f'Fitting {target} on data for', fname)
     d = distfit()
     if no_bootstrap:
         # disable the bootstrap test
         d = distfit()  
     else:
-        d = distfit(n_boots=100)
+        d = distfit(n_boots=1000)
     pd.set_option('display.precision', 16) # print with more decimals
-    res = d.fit_transform(np.array(edges), verbose = 0)
+    res = d.fit_transform(np.array(values), verbose = 0)
     d.plot()
-    print(res['summary'])
-    plt.savefig(args.results_folder + fname + '-' + str(size) + '.png')
-    res['summary'].to_csv(args.results_folder + fname + '-' + str(size) \
-                          + '.csv')
+    print(f'-------------{fname}-{target}-------------\n{res['summary']}')
+    fprefix = f'{args.results_folder}/{target}-{fname}-{size}-{comments}'
+    plt.savefig(fprefix +'.png')
+    res['summary'].to_csv(fprefix + '.csv')
     func = res['model']['model'].pdf
-    with open(args.results_folder + fname + "-data.gnuplot", 'w') as pfile:
-        pfile.write('# length, histogram \n')
+    with open(fprefix + "-data.gnuplot", 'w') as pfile:
+        pfile.write(f'# {target}, histogram \n')
         y = res['histdata'][0]
         x = res['histdata'][1]
         for i in range(len(x)):
@@ -182,7 +184,9 @@ def fit_length(edges, fname):
         pfile.write('\n\n')
         # add some initial x values to make all the fitted curves start from 10
         x = list(range(10,int(x[0]),20)) + list(res['histdata'][1])
-        pfile.write('# length, fitted\n')
+        pfile.write(f'# {target}, fitted\n')
+        if comments:
+            pfile.write(f'# {comments}')
         pfile.write(f'# {res["model"]["name"]} (params[] loc, scale) '
                     f'{res["model"]["params"]} '
                     f'mean={res["model"]["model"].mean()}\n')
@@ -196,16 +200,17 @@ runs = args.runs
 size = args.graph_size
 no_bootstrap = args.no_bootstrap
 fit_processes = []
+fso = FSOQKD()
 
 
 #for area in [rural_list]:#, suburban_list, urban_list]:
 
-if not runs: # do not regenerate the graphs, use the existing ones
+if args.fit_only: # do not regenerate the graphs, use the existing ones
     for area in ['rural', 'suburban', 'urban']:
         edges = []
         nodes = 0
         graphs_folder = args.results_folder + 'graphs'
-        file_list = glob.glob(f'{graphs_folder}/{area}*.graphml')
+        file_list = glob.glob(f'{graphs_folder}/{area}*.graphml')[:args.runs]
         if not file_list:
             print(f'I could not find files for the {area} areas in {graphs_folder}. Please generate them')
             exit()
@@ -217,8 +222,16 @@ if not runs: # do not regenerate the graphs, use the existing ones
                 nodes += len(g)
                 edges.extend([e['length'] for _,_,e in g.edges(data=True)])
         print(f'containing {len(edges)} edges and {nodes} nodes')
-        p = multiprocessing.Process(target=fit_length, args=(edges, area,))
+        comments = str(args.runs)
+        p = multiprocessing.Process(target=fit, args=(edges, area, 'length', comments))
         p.start()
+        fit_processes.append(p)
+        # get the rate in Mb/s
+        rates = [fso.get_rate(x, args.freq)[3]/1_000_000 for x in edges if x>0]
+        p = multiprocessing.Process(target=fit, args=(rates, area, 'rate', comments+'-'+str(args.freq)))
+        p.start()
+        fit_processes.append(p)
+
 else:
     for area in [rural_list, suburban_list, urban_list]:
         edges = []
@@ -233,9 +246,18 @@ else:
             edges.extend(e)
             print('Received', len(edges), 'edges')
         print('All workers provided edges')
-        p = multiprocessing.Process(target=fit_length, args=(edges, fname,))
+        if args.gen_only:
+            continue
+        comments = str(args.runs)
+        p = multiprocessing.Process(target=fit, args=(edges, fname, 'length', comments))
         p.start()
         fit_processes.append(p)
+        # get the rate in Mb/s
+        rates = [fso.get_rate(x, args.freq)[3]/1_000_000 for x in edges if x>0]
+        p = multiprocessing.Process(target=fit, args=(rates, fname, 'rate', comments + '-' + str(args.freq)))
+        p.start()
+        fit_processes.append(p)
+
 for p in fit_processes:
     p.join()
     
