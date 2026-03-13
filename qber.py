@@ -15,12 +15,12 @@ import seaborn as sb
 
 @dataclass
 class FSOQKD():
-    tx_power: float = 0.0300
-    visibility: float = 6
-    eta_q: float = 0.1   # quantum efficiency
+    tx_power: float = 0.0100 #m
+    visibility: float = 10 #Km
+    eta_q: float = 0.45   # quantum efficiency
     wave_lambda: float = 1550e-9    # wavelength
-    ts_diameter: float = 0.05       # telescope diameter in meters (source)
-    td_diameter: float = 0.18       # telescope diameter n meters (destination)
+    
+    td_diameter: float = 0.15       # telescope diameter n meters (destination)
     # optical efficiencies at S and D TODO: why are they different?
     eta_s: float = 0.9
     eta_d: float = 0.9
@@ -32,6 +32,7 @@ class FSOQKD():
      
     def get_rate(self, d, tx_rate):
         """ distance in m, tx_rate in photons/s, returns b/s """   
+        self.ts_diameter: float = 0.05       # telescope diameter in meters (source)
         self.responsivity = self.eta_q*(self.wave_lambda*1e6)/1.23985 # FIXME make this number a parameter
         self.s_gain = (math.pi*self.ts_diameter/self.wave_lambda)**2
         self.d_gain = (math.pi*self.td_diameter/self.wave_lambda)**2
@@ -42,6 +43,14 @@ class FSOQKD():
         self.l_teta = math.exp(-self.d_gain*self.teta**2)
         self.lambda_nm=self.wave_lambda*10**9
         self.elementary_q: float = 1.602e-19
+        self.reduction=0
+        #peppino
+        limit=280;#until which distance we want to correct the trend
+        if (d<limit):
+            self.reduction=(d/(1.1*limit));
+            self.ts_diameter=round(self.reduction*self.ts_diameter,4)
+            print(self.ts_diameter)
+            self.s_gain = (math.pi*self.ts_diameter/self.wave_lambda)**2
 
         if (self.visibility < 6):
             self.qstar = 0.585*self.visibility**(1/3);
@@ -60,7 +69,8 @@ class FSOQKD():
             * (LA/d**2) * (self.wave_lambda/(4*math.pi))**2
         P_rec = K1 * self.d_gain * self.l_teta
         P_rec2 = 0; # Not used (I left it here just if we need some additional statistic)
-        P_rec = P_rec*(10**(1.5/10)+10**(3/10) )
+        #Peppino
+        P_rec = P_rec*(10**(-4.5/10))
         #Confirmed for filtering (3dB) and housing (1.5dB) from refs. 10 and 11 respectively
         totAtt = P_rec/self.tx_power; #It's valid... between 0 and 1 (0---->1)
         # The quantity above can be called transmittance, instead of 
@@ -68,11 +78,11 @@ class FSOQKD():
         # Remind that total_attenuation considers: G_S*G_D*L_teta*eta_q*eta_S*eta_D*(LA/D1^2)*(lambda/(4*pi))^2 from above
         if (totAtt>1):
             #To be activated to know at which distance there is the amplification effect
-            print('Warning: detected amplification phenomenon at distance: ',
-                  d,' (m), please check link distance and/or telescope'
-                  'diameters for the gains');
+            #print('Warning: detected amplification phenomenon at distance: ',
+            #      d,' (m), please check link distance and/or telescope'
+            #      'diameters for the gains');
             #In order to avoid errors due to wrong transmission power setting
-            totAtt=0.999;#like no atmospheric attenuation
+            totAtt=0.9999;#like no atmospheric attenuation
         #I0dB=-20
         #Ranges from -30dB to -10dB
         I0 = P_rec/(math.pi*(self.td_diameter/2)**2); #Irradiance (Watts over receiver surface)
@@ -90,6 +100,7 @@ class FSOQKD():
         #Total noise
         N2 = N2back+N2term+N2q;
         SNR0 = P_rec/N2;
+        
         SNR = 10 * math.log10(SNR0);
         BER = 0.5 * math.erfc((1/(2*math.sqrt(2))) * math.sqrt(SNR0));
     
@@ -137,15 +148,18 @@ if __name__ == '__main__':
     y_old = []
     y_new = []
     df = pd.DataFrame()
-    tx_rate = 6_000_000_000
+    tx_rate = 500_000_000
+    print(tx_rate)
     tx_rate = 1
     new_f = FSOQKD()
-    for distance in np.arange(10, 1000, 10):
+    for distance in np.arange(10, 4000, 10):
         x.append(distance)
         new_func_res = new_f.get_rate(distance, tx_rate)
-        y_new.append(new_func_res[3]/1000_000)
-        y_old.append(new_func_res[2]/1000_000)
-    plt.plot(x, y_new, x, y_old)
+        y_new.append((tx_rate*1e6)*(new_func_res[3]/1000_000))
+        y_old.append((new_func_res[2]/1000_000))
+    #Peppino
+    #plt.plot(x, y_new, x, y_old)
+    plt.plot(x, y_new)
     plt.ylabel('bit-rate [Mb/s]')
     plt.xlabel('distance [m]')
     plt.yscale('log')

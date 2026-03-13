@@ -1,4 +1,5 @@
-  
+#!/usr/bin/env python3
+
 from distfit import distfit
 import numpy as np
 import matplotlib.pyplot as plt
@@ -19,34 +20,6 @@ suburban_list = ['visibility_graphs/suburban1/',
 
 urban_list = ['visibility_graphs/urban1/', 'visibility_graphs/urban2/',
                'visibility_graphs/urban3/']
-
-parser = argparse.ArgumentParser()
-parser.add_argument('--runs', type=int, default=10000)
-parser.add_argument('--gen_only', action='store_true', default=False)
-parser.add_argument('--fit_only', action='store_true', default=False)
-parser.add_argument('--freq', type=int, default=1_000_000_000)
-parser.add_argument('--graph_size', type=int, default=30)
-parser.add_argument('--no_bootstrap', action='store_true', default=False)
-parser.add_argument('--no_save', action='store_true', default=False)
-parser.add_argument('--seed', type=int)
-parser.add_argument('--max_len', type=int, help='Maximum link length', 
-                    default = 0)
-parser.add_argument('--results_folder', default='./results/')
-
-
-args = parser.parse_args()
-
-
-try:
-    os.mkdir(args.results_folder)
-except OSError:
-    pass
-
-if args.seed is not None:
-    np.random.seed(args.seed)
-    np.random.default_rng(args.seed)
-    print(f'Set random seed to {args.seed}')
-
 
 def distance(p1, p2):
     x1,y1 = p1
@@ -147,10 +120,11 @@ def gen_graphs(folder, runs=5000, size=30, fname='', gnumber=0):
         pass
     count = 0
     for g in MDRW(adj_file, size, coord_dict, runs):
+        g.graph.update({'scenario':folder})
         for frm, to, data in g.edges(data=True):
-            data['length'] = distance(coord_dict[int(frm)], 
-                                      coord_dict[int(to)]) 
-            data['BER'] = fso.get_rate(data['length'], 1)[2]
+            data['length'] =  distance(coord_dict[int(frm)], 
+                                      coord_dict[int(to)])
+            data['SKR'] = fso.get_rate(data['length'], 1)[3]
             edges.append(data['length'])
         nodes.extend(g.nodes())
         if not args.no_save:
@@ -196,71 +170,101 @@ def fit(values, fname, target='length', comments=''):
         
         pfile.write('\n\n')
     
-            
-runs = args.runs
-size = args.graph_size
-no_bootstrap = args.no_bootstrap
-fit_processes = []
-fso = FSOQKD()
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--runs', type=int, default=10000)
+    parser.add_argument('--processes', help='number of parallel processes', type=int, default=1)
+    parser.add_argument('--gen_only', action='store_true', default=False)
+    parser.add_argument('--fit_only', action='store_true', default=False)
+    parser.add_argument('--freq', type=int, default=1_000_000)
+    parser.add_argument('--graph_size', type=int, default=30)
+    parser.add_argument('--no_bootstrap', action='store_true', default=False)
+    parser.add_argument('--no_save', action='store_true', default=False)
+    parser.add_argument('--seed', type=int)
+    parser.add_argument('--max_len', type=int, help='Maximum link length', 
+                        default = 0)
+    parser.add_argument('--results_folder', default='./results/')
 
 
-#for area in [rural_list]:#, suburban_list, urban_list]:
+    args = parser.parse_args()
 
-if args.fit_only: # do not regenerate the graphs, use the existing ones
-    for area in ['rural', 'suburban', 'urban']:
-        edges = []
-        nodes = 0
-        graphs_folder = args.results_folder + 'graphs'
-        file_list = glob.glob(f'{graphs_folder}/{area}*.graphml')[:args.runs]
-        if not file_list:
-            print(f'I could not find files for the {area} areas in {graphs_folder}. Please generate them')
-            exit()
-        print(f'Using {len(file_list)} existing graphs for {area} areas ', end='')
-        # Open and read each file
-        for file_name in file_list:
-            with open(file_name, 'r') as f:
-                g = nx.read_graphml(f)
-                nodes += len(g)
-                edges.extend([e['length'] for _,_,e in g.edges(data=True)])
-        print(f'containing {len(edges)} edges and {nodes} nodes')
-        comments = str(args.runs)
-        p = multiprocessing.Process(target=fit, args=(edges, area, 'length', comments))
-        p.start()
-        fit_processes.append(p)
-        # get the rate in Mb/s
-        rates = [fso.get_rate(x, args.freq)[3]/1_000_000 for x in edges if x>0]
-        p = multiprocessing.Process(target=fit, args=(rates, area, 'rate', comments+'-'+str(args.freq)))
-        p.start()
-        fit_processes.append(p)
 
-else:
-    for area in [rural_list, suburban_list, urban_list]:
-        edges = []
-        pool = multiprocessing.Pool(processes=3)
-        arguments = []
-        gnumber = 0
-        for folder in area:
-            fname = ''.join(folder.split('/')[-2][:-1])
-            arguments.append([folder, int(runs/len(area)), size, fname, gnumber])
-            gnumber += 1
-        for e in pool.starmap(gen_graphs, arguments):
-            edges.extend(e)
-            print('Received', len(edges), 'edges')
-        print('All workers provided edges')
-        if args.gen_only:
-            continue
-        comments = str(args.runs)
-        p = multiprocessing.Process(target=fit, args=(edges, fname, 'length', comments))
-        p.start()
-        fit_processes.append(p)
-        # get the rate in Mb/s
-        rates = [fso.get_rate(x, args.freq)[3]/1_000_000 for x in edges if x>0]
-        p = multiprocessing.Process(target=fit, args=(rates, fname, 'rate', comments + '-' + str(args.freq)))
-        p.start()
-        fit_processes.append(p)
+    try:
+        os.mkdir(args.results_folder)
+    except OSError:
+        pass
 
-for p in fit_processes:
-    p.join()
+    if args.seed is not None:
+        np.random.seed(args.seed)
+        np.random.default_rng(args.seed)
+        print(f'Set random seed to {args.seed}')
+
+
+                
+    runs = args.runs
+    size = args.graph_size
+    no_bootstrap = args.no_bootstrap
+    fit_processes = []
+    fso = FSOQKD()
+
+
+    #for area in [rural_list]:#, suburban_list, urban_list]:
+
+    if args.fit_only: # do not regenerate the graphs, use the existing ones
+        for area in ['rural', 'suburban', 'urban']:
+            edges = []
+            nodes = 0
+            graphs_folder = args.results_folder + 'graphs'
+            file_list = glob.glob(f'{graphs_folder}/{area}*.graphml')[:args.runs]
+            if not file_list:
+                print(f'I could not find files for the {area} areas in {graphs_folder}. Please generate them')
+                exit()
+            print(f'Using {len(file_list)} existing graphs for {area} areas ', end='')
+            # Open and read each file
+            for file_name in file_list:
+                with open(file_name, 'r') as f:
+                    g = nx.read_graphml(f)
+                    nodes += len(g)
+                    edges.extend([e['length'] for _,_,e in g.edges(data=True)])
+            print(f'containing {len(edges)} edges and {nodes} nodes')
+            comments = str(args.runs)
+            p = multiprocessing.Process(target=fit, args=(edges, area, 'length', comments))
+            p.start()
+            fit_processes.append(p)
+            # get the rate in Mb/s
+            rates = [fso.get_rate(x, args.freq)[3]/1_000_000 for x in edges if x>0]
+            p = multiprocessing.Process(target=fit, args=(rates, area, 'rate', comments+'-'+str(args.freq)))
+            p.start()
+            fit_processes.append(p)
+
+    else:
+        for area in [rural_list, suburban_list, urban_list]:
+            edges = []
+            pool = multiprocessing.Pool(processes=args.processes)
+            arguments = []
+            gnumber = 0
+            for folder in area:
+                fname = ''.join(folder.split('/')[-2][:-1])
+                arguments.append([folder, int(runs/len(area)), size, fname, gnumber])
+                gnumber += 1
+            for e in pool.starmap(gen_graphs, arguments):
+                edges.extend(e)
+                print('Received', len(edges), 'edges')
+            print('All workers provided edges')
+            if args.gen_only:
+                continue
+            comments = str(args.runs)
+            p = multiprocessing.Process(target=fit, args=(edges, fname, 'length', comments))
+            p.start()
+            fit_processes.append(p)
+            # get the rate in Mb/s
+            rates = [fso.get_rate(x, args.freq)[3]/1_000_000 for x in edges if x>0]
+            p = multiprocessing.Process(target=fit, args=(rates, fname, 'rate', comments + '-' + str(args.freq)))
+            p.start()
+            fit_processes.append(p)
+
+    for p in fit_processes:
+        p.join()
     
 
     
