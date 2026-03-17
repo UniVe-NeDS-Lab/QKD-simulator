@@ -11,6 +11,7 @@ import time
 import os
 import glob
 from qber import FSOQKD
+from qber_2025 import calculate_theoretical_skr
 
 rural_list = ['visibility_graphs/rural1/', 'visibility_graphs/rural2/', 
                'visibility_graphs/rural3/']
@@ -124,7 +125,8 @@ def gen_graphs(folder, runs=5000, size=30, fname='', gnumber=0):
         for frm, to, data in g.edges(data=True):
             data['length'] =  distance(coord_dict[int(frm)], 
                                       coord_dict[int(to)])
-            data['SKR'] = fso.get_rate(data['length'], 1)[3]
+            #data['SKR'] = fso.get_rate(data['length'], 1)[3]
+            data['SKR'] = calculate_theoretical_skr(data['length'])
             edges.append(data['length'])
         nodes.extend(g.nodes())
         if not args.no_save:

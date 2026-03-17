@@ -17,6 +17,7 @@ import matplotlib.pyplot as plt
 from matplotlib import rc
 import random
 import tqdm
+import argparse 
 
 nodes = 10
 
@@ -29,16 +30,21 @@ def sedge(s,d=None):
 
 def create_graph(nodes=10):
     """ for testing purposes """
-    lambdas = {}
     g = nx.path_graph(nodes) # a path graph
     for _,_,d in g.edges(data=True):
         d['SKR'] = 1
+    lambdas = set_lambda(g)
+    return g, lambdas
+
+
+def set_lambda(g, lbd=1):
+    lambdas = {}
     for n in g:
         for m in g:
             if n == m:
                 continue
-            lambdas[(n,m)] = 4/(math.pow(nodes,2)-nodes)
-    return g, lambdas
+            lambdas[(n,m)] = lbd
+    return lambdas
 
 def relabel_graph(g):
     relabels = {}
@@ -137,6 +143,30 @@ def plot_graphs(g, rhos, prob_dict):
     plt.show()
 
 if __name__ == '__main__':
-    g, lambdas = create_graph()
-    rhos, prob_dict = compute_rhos(g, lambdas)
-    plot_graphs(g, rhos, prob_dict)
+    """ graph g is expected to have a link attribute 'SKR' that contains 
+    the secrete key rate. While lambda[(n,m)] is the traffic intensity 
+    from node n do m. Units are arbitrary, they must be consistent """
+    
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--files', help='a list of .graphml files to parse', 
+                        nargs='+', required=True)
+    #parser.add_argument('--processes', help='number of parallel processes', type=int, default=1)
+    #parser.add_argument('--gen_only', action='store_true', default=False)
+    #parser.add_argument('--fit_only', action='store_true', default=False)
+    #parser.add_argument('--freq', type=int, default=1_000_000)
+    # parser.add_argument('--graph_size', type=int, default=30)
+    # parser.add_argument('--no_bootstrap', action='store_true', default=False)
+    # parser.add_argument('--no_save', action='store_true', default=False)
+    # parser.add_argument('--seed', type=int)
+    # parser.add_argument('--max_len', type=int, help='Maximum link length', 
+    #                     default = 0)
+    parser.add_argument('--lbd', help='Traffic intensity (lambda), in Mb/s', 
+                        default=1)
+    args = parser.parse_args()
+    
+    for fname in args.files:
+        g = nx.read_graphml(fname)
+        rhos, prob_dict = compute_rhos(g, set_lambda(g, args.lbd))
+        plot_graphs(g, rhos, prob_dict)    
+    #g, lambdas = create_graph()
+    

@@ -45,7 +45,7 @@ class FSOQKD():
         self.elementary_q: float = 1.602e-19
         self.reduction=0
         #peppino
-        limit=280;#until which distance we want to correct the trend
+        limit=0;#until which distance we want to correct the trend
         if (d<limit):
             self.reduction=(d/(1.1*limit));
             self.ts_diameter=round(self.reduction*self.ts_diameter,4)
