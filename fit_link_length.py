@@ -28,7 +28,6 @@ def distance(p1, p2):
     x2,y2 = p2
     return ((x1-x2)**2 + (y1-y2)**2)**0.5
 
-
 def filter_edges(adj_list_file, max_len, coord_dict, sample_size):
     """ return a list of graphs that are connected components that 
     satisfy a maximum link lenght and a minimum number of nodes """
@@ -198,7 +197,7 @@ if __name__ == '__main__':
     parser.add_argument('--processes', help='number of parallel processes', type=int, default=1)
     parser.add_argument('--gen_only', action='store_true', default=False)
     parser.add_argument('--fit_only', action='store_true', default=False)
-    parser.add_argument('--freq', type=int, default=1_000_000)
+    parser.add_argument('--gen_rate', type=int, default=1_000_000_000)
     parser.add_argument('--graph_size', type=int, default=30)
     parser.add_argument('--no_bootstrap', action='store_true', default=False)
     parser.add_argument('--no_save', action='store_true', default=False)
@@ -254,8 +253,8 @@ if __name__ == '__main__':
             p.start()
             fit_processes.append(p)
             # get the rate in Mb/s
-            rates = [fso.get_rate(x, args.freq)[3]/1_000_000 for x in edges if x>0]
-            p = multiprocessing.Process(target=fit, args=(rates, area, 'rate', comments+'-'+str(args.freq)))
+            rates = [fso.get_rate(x, args.gen_rate)[3]/1_000_000 for x in edges if x>0]
+            p = multiprocessing.Process(target=fit, args=(rates, area, 'rate', comments+'-'+str(args.gen_rate)))
             p.start()
             fit_processes.append(p)
 
@@ -280,8 +279,8 @@ if __name__ == '__main__':
             p.start()
             fit_processes.append(p)
             # get the rate in Mb/s
-            rates = [fso.get_rate(x, args.freq)[3]/1_000_000 for x in edges if x>0]
-            p = multiprocessing.Process(target=fit, args=(rates, fname, 'rate', comments + '-' + str(args.freq)))
+            rates = [fso.get_rate(x, args.gen_rate)[3]/1_000_000 for x in edges if x>0]
+            p = multiprocessing.Process(target=fit, args=(rates, fname, 'rate', comments + '-' + str(args.gen_rate)))
             p.start()
             fit_processes.append(p)
 

@@ -75,7 +75,7 @@ def psi(s, d, rhos, lambdas, g):
             t = t + lambdas[(start,stop)]*fact 
     return t
 
-def compute_rhos(g, lambdas, verbose=True, directed=False):
+def compute_rhos(g, lambdas, verbose=False, directed=False):
     rhos = dict.fromkeys([sedge(e) for e in g.edges()], 0.1)
     oldrhos = dict.fromkeys(rhos.keys(), 0)
     #relaxation coefficient
@@ -162,9 +162,10 @@ def mean_confidence_interval(data, confidence=0.95):
     
     return m, h
 
-def parse_all_graphs(files, lbd, d):
+def parse_all_graphs(files, lbd):
     areas = set()
     sizes = set()
+    results = []
     graphs = defaultdict(list)
     for fpath in files:
         f = Path(fpath).name
@@ -183,8 +184,9 @@ def parse_all_graphs(files, lbd, d):
                 _, prob_dict = compute_rhos(g, l)
                 probs.extend([p for plist in prob_dict.values() for p in plist])
             m, h = mean_confidence_interval(probs) 
-        d.loc[len(d)] = [area, size, lbd, m, h, len(probs), len(glist)]
-    print(d)
+        results.append([area, size, lbd, m, h, len(probs), len(glist)])
+        
+    return results
     
 if __name__ == '__main__':
     """ graph g is expected to have a link attribute 'SKR' that contains 
@@ -194,19 +196,30 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--files', help='a list of .graphml files to parse', 
                         nargs='+', required=True)
-    parser.add_argument('--lbd', help='Traffic intensity (lambda), in Mb/s', 
-                        type=float, default=1, nargs='+')
+    #parser.add_argument('--lbd', help='Traffic intensity (lambda), in Mb/s', 
+    #                    type=float, default=1, nargs='+')
     parser.add_argument('--gen_rate', type=int, default=1_000_000_000)
+    parser.add_argument('--traffic_demand', type=int, default=100,
+                        help="The actual traffic demand between every couple "
+                        "of nodes (Mb/s). List is supported", nargs='+')
+    parser.add_argument('--rekey_interval', type=int, default=100,
+                        help="The interval between rekeys (GB).")
+    parser.add_argument('--key_size', type=int, default=256)
 
+    
     args = parser.parse_args()
     d = pd.DataFrame(columns=['area', 'size', 'lambda', 'avg', 'CI', 'paths', 
-                              'graphs'])   
-    for lbd in args.lbd:
-            parse_all_graphs(args.files, lbd, d)
-    exit()
-    for fname in args.files:
-        g = nx.read_graphml(fname)
-        rhos, prob_dict = compute_rhos(g, set_lambda(g, args.lbd))
-        plot_graphs(g, rhos, prob_dict)    
-    #g, lambdas = create_graph()
-    
+                              'graphs', 'gen_rate (Gb/s)', 'traffic_demand (Mb/s)', 
+                              'rekey_interval (GB)'])   
+    for dem in args.traffic_demand:
+        # every rekey_interval Bytes, we need a key of size key_size, so for 
+        # every QKD bit sent, we can carry key_size/rekey_interval*8 
+        # thus to sustain a certain traffic_demand we need a QKD load of:
+        lbd = dem*1_000_000*args.key_size/\
+          (args.rekey_interval*100_000_000_000*8)
+        print(lbd)
+        res = parse_all_graphs(args.files, lbd)
+        for line in res:
+            d.loc[len(d)] = line + [args.gen_rate/1000_000_000, dem, 
+                                    args.rekey_interval]
+    print(d)
