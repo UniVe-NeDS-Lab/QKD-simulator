@@ -10,14 +10,16 @@ import numpy as np
 import math
 import networkx as nx
 from numpy import linalg as LA
-
+from scipy import stats
 from collections import defaultdict
+import pandas as pd
 
 import matplotlib.pyplot as plt
 from matplotlib import rc
 import random
 import tqdm
 import argparse 
+from pathlib import Path
 
 nodes = 10
 
@@ -73,7 +75,7 @@ def psi(s, d, rhos, lambdas, g):
             t = t + lambdas[(start,stop)]*fact 
     return t
 
-def compute_rhos(g, lambdas, verbose=True):
+def compute_rhos(g, lambdas, verbose=True, directed=False):
     rhos = dict.fromkeys([sedge(e) for e in g.edges()], 0.1)
     oldrhos = dict.fromkeys(rhos.keys(), 0)
     #relaxation coefficient
@@ -98,9 +100,16 @@ def compute_rhos(g, lambdas, verbose=True):
         print()
     r = []
     all_paths = dict(nx.all_pairs_shortest_path(g))
+    couple_set = set()
     prob_dict = defaultdict(list)
     for source in all_paths:
         for dest in all_paths[source]:
+            tup = (min(source, dest), max(source, dest))
+            if source == dest:
+                continue
+            if not directed and tup in couple_set:
+                continue
+            couple_set.add(tup)
             path = all_paths[source][dest]
             lpath = len(path)
             edges = [(path[i],path[i+1]) for i in range(lpath-1)]
@@ -141,7 +150,42 @@ def plot_graphs(g, rhos, prob_dict):
     fix, ax = plt.subplots()
     nx.draw(g, edge_color=edge_colors, edge_cmap=plt.cm.autumn, with_labels=True)
     plt.show()
+    
+    
+def mean_confidence_interval(data, confidence=0.95):
+    a = 1.0 * np.array(data)
+    n = len(a)
+    m, se = np.mean(a), stats.sem(a) # Mean and Standard Error
+    
+    # Calculate the CI
+    h = se * stats.t.ppf((1 + confidence) / 2, n-1)
+    
+    return m, h
 
+def parse_all_graphs(files, lbd, d):
+    areas = set()
+    sizes = set()
+    graphs = defaultdict(list)
+    for fpath in files:
+        f = Path(fpath).name
+        area = f.split('-')[0]
+        size = f.split('-')[2][4:]
+        areas.add(area)
+        sizes.add(int(size))
+        graphs[area+size].append(fpath)
+    for area in areas:
+        for size in sorted(sizes):
+            probs = []
+            glist = graphs[area+str(size)]
+            for g in glist:
+                g = nx.read_graphml(g)
+                l = set_lambda(g, lbd)
+                _, prob_dict = compute_rhos(g, l)
+                probs.extend([p for plist in prob_dict.values() for p in plist])
+            m, h = mean_confidence_interval(probs) 
+        d.loc[len(d)] = [area, size, lbd, m, h, len(probs), len(glist)]
+    print(d)
+    
 if __name__ == '__main__':
     """ graph g is expected to have a link attribute 'SKR' that contains 
     the secrete key rate. While lambda[(n,m)] is the traffic intensity 
@@ -150,20 +194,14 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--files', help='a list of .graphml files to parse', 
                         nargs='+', required=True)
-    #parser.add_argument('--processes', help='number of parallel processes', type=int, default=1)
-    #parser.add_argument('--gen_only', action='store_true', default=False)
-    #parser.add_argument('--fit_only', action='store_true', default=False)
-    #parser.add_argument('--freq', type=int, default=1_000_000)
-    # parser.add_argument('--graph_size', type=int, default=30)
-    # parser.add_argument('--no_bootstrap', action='store_true', default=False)
-    # parser.add_argument('--no_save', action='store_true', default=False)
-    # parser.add_argument('--seed', type=int)
-    # parser.add_argument('--max_len', type=int, help='Maximum link length', 
-    #                     default = 0)
     parser.add_argument('--lbd', help='Traffic intensity (lambda), in Mb/s', 
-                        default=1)
+                        type=float, default=1, nargs='+')
     args = parser.parse_args()
-    
+    d = pd.DataFrame(columns=['area', 'size', 'lambda', 'avg', 'CI', 'paths', 
+                              'graphs'])   
+    for lbd in args.lbd:
+            parse_all_graphs(args.files, lbd, d)
+    exit()
     for fname in args.files:
         g = nx.read_graphml(fname)
         rhos, prob_dict = compute_rhos(g, set_lambda(g, args.lbd))

@@ -12,9 +12,9 @@ def H2(x):
 
 def calculate_theoretical_skr(d_b, Cn2=1e-14):
     """
-    Calculates the SKR in Mbps using the exact analytical lower bound 
-    derived in Eq. 18 of the paper.
-     - d_b is the distance in m
+    Calculates the normalized SKR (bits/pulse) using the exact analytical lower 
+    bound derived in Eq. 18 of the paper.
+     - d_b is the distance in km
      - Cn2 is the air turbolence, 1e-14 is average turbolence
     """
     # System parameters explicitly from the paper's Section IV
@@ -46,6 +46,7 @@ def calculate_theoretical_skr(d_b, Cn2=1e-14):
         alpha, beta = np.inf, np.inf
         turbulence_factor = 1.0
     else:
+        d_b = d_b/1000 # report to m
         alpha = (np.exp(0.49 * sigma_I2 / (1 + 1.11 * sigma_I2**(12/5))**(7/6)) - 1)**(-1)
         beta =  (np.exp(0.51 * sigma_I2 / (1 + 0.69 * sigma_I2**(12/5))**(5/6)) - 1)**(-1)
         turbulence_factor = (alpha * beta) / ((alpha - 1) * (beta - 1))
@@ -75,15 +76,16 @@ def calculate_theoretical_skr(d_b, Cn2=1e-14):
     # Analytical lower bound for Secret Key Rate per pulse (Eq. 17 & 18)
     rd = 0.5 * (Q1_avg * (1 - H2(e1_avg)) - f * Qmu_avg * H2(emu_avg))
     
-    # Convert to Mbps
-    skr_mbps = (rd * rep_rate) / 1e6
+    # rate is in bit per pulse. Must be multiplied for the photon generation
+    # rate
+    skr_mbps = rd 
     return max(0, skr_mbps)
 
 def replicate_paper_figure_3():
     """Plots the theoretical SKR for weak turbulence, to replicate the results
     in the original paper."""
     # The paper plots up to 1500m for Figures 3, 4, and 5
-    distances = np.linspace(0.1, 30000, 100) 
+    distances = np.linspace(0.1, 30, 100) 
     cn2_value = 1e-14 # Moderate turbulence (this ranges from 1e-13 to 1e-15,
                       # but authors show its impact is very low on the SKR
     
@@ -97,7 +99,7 @@ def replicate_paper_figure_3():
     #plt.ylim(10, 30) # Adjust based on exact plot boundaries
     #plt.xlim(0, 30000)
     
-    plt.xlabel('$d_b$ (in m)', fontsize=12)
+    plt.xlabel('$d_b$ (in km)', fontsize=12)
     plt.ylabel('SKR (Mbps)', fontsize=12)
     plt.title('Secrecy key rate for DVQKD $C_n^2 = 1e-15$', fontsize=14)
     plt.legend(loc='upper right')

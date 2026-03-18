@@ -1,3 +1,5 @@
+#! /usr/bin/env python3 
+
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -38,7 +40,8 @@ def calculate_skr(L_atm_add, dist=0.3):
     Calculates SKR/frep using the exact conventions of the paper.
     
     Args:
-        L_atm_add: Additional atmospheric attenuation (dB) 
+        L_atm_add: Additional atmospheric attenuation (dB). If zero, we assume
+        perfect weather
         dist: Distance in km (default 0.3 km for Fig 2)
     """
     # --- Equation (2): Geometrical Loss ---
@@ -87,7 +90,7 @@ def calculate_skr(L_atm_add, dist=0.3):
     R = q * (Q1 * (1 - h2(e1)) - Q_mu * f_e * h2(E_mu))
     
     if R < 1e-10:
-        return 0
+        return 0.0
     return R 
 
 # --- Execution and Plotting ---
@@ -110,9 +113,17 @@ def generate_plots():
     
     # Reference thresholds from Section IV-C
     plt.axvline(11.8, color='red', linestyle=':', label='Threshold (11.8 dB)')
-    
     plt.legend()
     plt.show()
+    
+    plt.figure(figsize=(8, 6))
+    l = np.linspace(0, 6, 100)
+    plt.plot(l, [calculate_skr(0, dist) for dist in l])
+    plt.title('Normalized SKR with perfect weather conditions')
+    plt.xlabel('Distance (km)')    
+    plt.show()
+    
+    
 
 if __name__ == "__main__":
     generate_plots()

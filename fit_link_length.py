@@ -11,7 +11,8 @@ import time
 import os
 import glob
 from qber import FSOQKD
-from qber_2025 import calculate_theoretical_skr
+from qber_2021 import calculate_skr
+import random
 
 rural_list = ['visibility_graphs/rural1/', 'visibility_graphs/rural2/', 
                'visibility_graphs/rural3/']
@@ -27,33 +28,50 @@ def distance(p1, p2):
     x2,y2 = p2
     return ((x1-x2)**2 + (y1-y2)**2)**0.5
 
-def MDRW(adj_list_file, sample_size, coord_dict, ngraphs=1, 
+
+def filter_edges(adj_list_file, max_len, coord_dict, sample_size):
+    """ return a list of graphs that are connected components that 
+    satisfy a maximum link lenght and a minimum number of nodes """
+    g = nx.read_adjlist(adj_list_file, delimiter=',')
+    if not max_len:
+        return [g]
+    
+    def filter_edge(frm, to):
+        return distance(coord_dict[int(frm)], 
+                        coord_dict[int(to)]) < max_len
+    
+    # remove edges shorter than the threshold
+    if max_len:
+        g = nx.subgraph_view(g, filter_edge=filter_edge)
+    # filter out too small components
+    large_components = [g.subgraph(c) for c in nx.connected_components(g)
+                        if len(c) >= sample_size]
+    return large_components
+   
+
+def MDRW(components, sample_size, coord_dict, ngraphs=1, 
          use_cent=False, save_to=''):
     """ multi-dimensional random walk, with an optional variant to use 
         eigenvector centrality to tune the probabilities """
     core_nodes = 5
-    g = nx.read_adjlist(adj_list_file, delimiter=',')
-    
-    def filter_edge(frm, to):
-        return distance(coord_dict[int(frm)], 
-                        coord_dict[int(to)]) < args.max_len
-    
-    if args.max_len:
-        g = nx.subgraph_view(g, filter_edge=filter_edge)
-        
-    tot_cent = 0
-    c_dict = {}
-
-    if use_cent:
-        print('Computing  centrality')
-        for (nlist,cent) in nx.eigenvector_centrality(g).items():
-            for n in nlist.split(','):
-                c_dict[n] = cent
-                tot_cent += cent
-        print('Done with centrality')
-    print('Starting to sample')
+   
     graphs = []
-    while len(graphs) < ngraphs:
+    while len(graphs) < ngraphs:      
+        # if the graph is split in components (this happens when we filter 
+        # the edges for their length) pick one at random
+        g = random.sample(components, 1)[0]
+        tot_cent = 0
+        c_dict = {}
+    
+        if use_cent:
+            print('Computing  centrality')
+            for (nlist,cent) in nx.eigenvector_centrality(g).items():
+                for n in nlist.split(','):
+                    c_dict[n] = cent
+                    tot_cent += cent
+            print('Done with centrality')
+        print('Starting to sample')
+
         nodes = set()
         if use_cent:
             core = list(np.random.choice([x for x in c_dict], 
@@ -119,18 +137,20 @@ def gen_graphs(folder, runs=5000, size=30, fname='', gnumber=0):
         os.mkdir(save_folder)
     except OSError:
         pass
+    #FIXME
     count = 0
-    for g in MDRW(adj_file, size, coord_dict, runs):
+    components = filter_edges(adj_file, args.max_len, coord_dict, size)
+    for g in MDRW(components, size, coord_dict, runs):
         g.graph.update({'scenario':folder})
         for frm, to, data in g.edges(data=True):
             data['length'] =  distance(coord_dict[int(frm)], 
                                       coord_dict[int(to)])
             #data['SKR'] = fso.get_rate(data['length'], 1)[3]
-            data['SKR'] = calculate_theoretical_skr(data['length'])
+            data['SKR'] = calculate_skr(0, data['length']/1000) # convert to km
             edges.append(data['length'])
         nodes.extend(g.nodes())
         if not args.no_save:
-            nx.write_graphml(g, save_folder + f'/{fname}-{gnumber}-{str(count)}.graphml')
+            nx.write_graphml(g, save_folder + f'/{fname}-ZONE{gnumber}-SIZE{size}-G{str(count)}.graphml')
         count += 1
     print("Sub graph density:", len(edges)/len(nodes))
 
@@ -183,7 +203,7 @@ if __name__ == '__main__':
     parser.add_argument('--no_bootstrap', action='store_true', default=False)
     parser.add_argument('--no_save', action='store_true', default=False)
     parser.add_argument('--seed', type=int)
-    parser.add_argument('--max_len', type=int, help='Maximum link length', 
+    parser.add_argument('--max_len', type=int, help='Maximum link length (m)', 
                         default = 0)
     parser.add_argument('--results_folder', default='./results/')
 
