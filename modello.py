@@ -196,6 +196,8 @@ if __name__ == '__main__':
                         nargs='+', required=True)
     parser.add_argument('--lbd', help='Traffic intensity (lambda), in Mb/s', 
                         type=float, default=1, nargs='+')
+    parser.add_argument('--gen_rate', type=int, default=1_000_000_000)
+
     args = parser.parse_args()
     d = pd.DataFrame(columns=['area', 'size', 'lambda', 'avg', 'CI', 'paths', 
                               'graphs'])   
