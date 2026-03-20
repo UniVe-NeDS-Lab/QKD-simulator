@@ -108,7 +108,7 @@ def generate_plots():
     plt.xlabel("Additional Atmospheric Attenuation (dB)")
     plt.ylabel("SKR / $f_{rep}$")
     plt.xlim(0, 14)
-    plt.ylim(1e-9, 1e-3)
+    plt.ylim(1e-9, 1e-2)
     plt.grid(True, which="both", linestyle='--', alpha=0.5)
     
     # Reference thresholds from Section IV-C
@@ -116,14 +116,22 @@ def generate_plots():
     plt.legend()
     plt.show()
     
+ 
+    
+
+def SKR_over_distance():
+    
     plt.figure(figsize=(8, 6))
     l = np.linspace(0, 6, 100)
     plt.plot(l, [calculate_skr(0, dist) for dist in l])
     plt.title('Normalized SKR with perfect weather conditions')
     plt.xlabel('Distance (km)')    
     plt.show()
-    
-    
+    print("#Normalized SKR over distance (km)")
+    print("d SKR")
+    for i in range(len(l)):
+        print(l[i], calculate_skr(0, l[i]))
 
 if __name__ == "__main__":
     generate_plots()
+    SKR_over_distance()

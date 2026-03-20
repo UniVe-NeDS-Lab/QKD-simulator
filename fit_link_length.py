@@ -32,8 +32,7 @@ def filter_edges(adj_list_file, max_len, coord_dict, sample_size):
     """ return a list of graphs that are connected components that 
     satisfy a maximum link lenght and a minimum number of nodes """
     g = nx.read_adjlist(adj_list_file, delimiter=',')
-    if not max_len:
-        return [g]
+
     
     def filter_edge(frm, to):
         return distance(coord_dict[int(frm)], 
@@ -55,6 +54,8 @@ def MDRW(components, sample_size, coord_dict, ngraphs=1,
     core_nodes = 5
    
     graphs = []
+    print('Starting to sample')
+
     while len(graphs) < ngraphs:      
         # if the graph is split in components (this happens when we filter 
         # the edges for their length) pick one at random
@@ -69,8 +70,6 @@ def MDRW(components, sample_size, coord_dict, ngraphs=1,
                     c_dict[n] = cent
                     tot_cent += cent
             print('Done with centrality')
-        print('Starting to sample')
-
         nodes = set()
         if use_cent:
             core = list(np.random.choice([x for x in c_dict], 
@@ -136,9 +135,9 @@ def gen_graphs(folder, runs=5000, size=30, fname='', gnumber=0):
         os.mkdir(save_folder)
     except OSError:
         pass
-    #FIXME
     count = 0
     components = filter_edges(adj_file, args.max_len, coord_dict, size)
+
     for g in MDRW(components, size, coord_dict, runs):
         g.graph.update({'scenario':folder})
         for frm, to, data in g.edges(data=True):
@@ -172,11 +171,17 @@ def fit(values, fname, target='length', comments=''):
     res['summary'].to_csv(fprefix + '.csv')
     func = res['model']['model'].pdf
     with open(fprefix + "-data.gnuplot", 'w') as pfile:
-        pfile.write(f'# {target}, histogram \n')
+        pfile.write(f'# {target}, histogram, cumulative \n')
         y = res['histdata'][0]
         x = res['histdata'][1]
+        cumsum = 0
         for i in range(len(x)):
-            pfile.write(f'{x[i]} {y[i]}\n')
+            if not i:
+                cumsum = y[i]*x[i]
+                pfile.write(f'{x[i]} {y[i]} {cumsum}\n')
+            else:
+                cumsum += y[i]*(x[i]-x[i-1])
+                pfile.write(f'{x[i]} {cumsum}\n')
         pfile.write('\n\n')
         # add some initial x values to make all the fitted curves start from 10
         x = list(range(10,int(x[0]),20)) + list(res['histdata'][1])
@@ -201,12 +206,11 @@ if __name__ == '__main__':
     parser.add_argument('--graph_size', type=int, default=30)
     parser.add_argument('--no_bootstrap', action='store_true', default=False)
     parser.add_argument('--no_save', action='store_true', default=False)
-    parser.add_argument('--seed', type=int)
+    parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--max_len', type=int, help='Maximum link length (m)', 
                         default = 0)
     parser.add_argument('--results_folder', default='./results/')
-
-
+ 
     args = parser.parse_args()
 
 
@@ -219,8 +223,6 @@ if __name__ == '__main__':
         np.random.seed(args.seed)
         np.random.default_rng(args.seed)
         print(f'Set random seed to {args.seed}')
-
-
                 
     runs = args.runs
     size = args.graph_size
@@ -228,8 +230,6 @@ if __name__ == '__main__':
     fit_processes = []
     fso = FSOQKD()
 
-
-    #for area in [rural_list]:#, suburban_list, urban_list]:
 
     if args.fit_only: # do not regenerate the graphs, use the existing ones
         for area in ['rural', 'suburban', 'urban']:
@@ -253,10 +253,10 @@ if __name__ == '__main__':
             p.start()
             fit_processes.append(p)
             # get the rate in Mb/s
-            rates = [fso.get_rate(x, args.gen_rate)[3]/1_000_000 for x in edges if x>0]
-            p = multiprocessing.Process(target=fit, args=(rates, area, 'rate', comments+'-'+str(args.gen_rate)))
-            p.start()
-            fit_processes.append(p)
+            #rates = [fso.get_rate(x, args.gen_rate)[3]/1_000_000 for x in edges if x>0]
+            #p = multiprocessing.Process(target=fit, args=(rates, area, 'rate', comments+'-'+str(args.gen_rate)))
+            #p.start()
+            #fit_processes.append(p)
 
     else:
         for area in [rural_list, suburban_list, urban_list]:
@@ -266,8 +266,10 @@ if __name__ == '__main__':
             gnumber = 0
             for folder in area:
                 fname = ''.join(folder.split('/')[-2][:-1])
-                arguments.append([folder, int(runs/len(area)), size, fname, gnumber])
+                arguments.append([folder, max(int(runs/len(area)), 1), size, fname, gnumber])
                 gnumber += 1
+                if gnumber == runs:
+                    break
             for e in pool.starmap(gen_graphs, arguments):
                 edges.extend(e)
                 print('Received', len(edges), 'edges')
@@ -279,10 +281,10 @@ if __name__ == '__main__':
             p.start()
             fit_processes.append(p)
             # get the rate in Mb/s
-            rates = [fso.get_rate(x, args.gen_rate)[3]/1_000_000 for x in edges if x>0]
-            p = multiprocessing.Process(target=fit, args=(rates, fname, 'rate', comments + '-' + str(args.gen_rate)))
-            p.start()
-            fit_processes.append(p)
+            #rates = [fso.get_rate(x, args.gen_rate)[3]/1_000_000 for x in edges if x>0]
+            #p = multiprocessing.Process(target=fit, args=(rates, fname, 'rate', comments + '-' + str(args.gen_rate)))
+            #p.start()
+            #fit_processes.append(p)
 
     for p in fit_processes:
         p.join()

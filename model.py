@@ -184,7 +184,7 @@ def parse_all_graphs(files, lbd):
                 _, prob_dict = compute_rhos(g, l)
                 probs.extend([p for plist in prob_dict.values() for p in plist])
             m, h = mean_confidence_interval(probs) 
-        results.append([area, size, lbd, m, h, len(probs), len(glist)])
+            results.append([area, size, lbd, m, h, len(probs), len(glist)])
         
     return results
     
@@ -199,7 +199,7 @@ if __name__ == '__main__':
     #parser.add_argument('--lbd', help='Traffic intensity (lambda), in Mb/s', 
     #                    type=float, default=1, nargs='+')
     parser.add_argument('--gen_rate', type=int, default=1_000_000_000)
-    parser.add_argument('--traffic_demand', type=int, default=100,
+    parser.add_argument('--traffic_demand', type=int, default=[100],
                         help="The actual traffic demand between every couple "
                         "of nodes (Mb/s). List is supported", nargs='+')
     parser.add_argument('--rekey_interval', type=int, default=100,
@@ -210,7 +210,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
     d = pd.DataFrame(columns=['area', 'size', 'lambda', 'avg', 'CI', 'paths', 
                               'graphs', 'gen_rate (Gb/s)', 'traffic_demand (Mb/s)', 
-                              'rekey_interval (GB)'])   
+                              'rekey_interval (GB)'])
     for dem in args.traffic_demand:
         # every rekey_interval Bytes, we need a key of size key_size, so for 
         # every QKD bit sent, we can carry key_size/rekey_interval*8 
