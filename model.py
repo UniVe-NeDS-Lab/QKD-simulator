@@ -20,6 +20,7 @@ import random
 import tqdm
 import argparse 
 from pathlib import Path
+import multiprocessing
 
 nodes = 10
 
@@ -174,18 +175,22 @@ def parse_all_graphs(files, lbd):
         areas.add(area)
         sizes.add(int(size))
         graphs[area+size].append(fpath)
+    pool = multiprocessing.Pool(processes=args.processes)
+    print(args.processes)
     for area in areas:
         for size in sorted(sizes):
             probs = []
             glist = graphs[area+str(size)]
+            f_args = []
             for g in glist:
                 g = nx.read_graphml(g)
                 l = set_lambda(g, lbd)
-                _, prob_dict = compute_rhos(g, l)
-                probs.extend([p for plist in prob_dict.values() for p in plist])
-            m, h = mean_confidence_interval(probs) 
-            results.append([area, size, lbd, m, h, len(probs), len(glist)])
-        
+                f_args.append((g,l))
+            res = pool.starmap(compute_rhos, f_args)
+            for (x, prob_dict) in res:
+                probs.extend([p for plist in prob_dict.values() for p in plist])      
+                m, h = mean_confidence_interval(probs) 
+                results.append([area, size, lbd, m, h, len(probs), len(glist)])    
     return results
     
 if __name__ == '__main__':
@@ -205,6 +210,9 @@ if __name__ == '__main__':
     parser.add_argument('--rekey_interval', type=int, default=100,
                         help="The interval between rekeys (GB).")
     parser.add_argument('--key_size', type=int, default=256)
+    parser.add_argument('--processes', help='number of parallel processes', 
+                        type=int, default=1)
+
 
     
     args = parser.parse_args()
@@ -217,7 +225,7 @@ if __name__ == '__main__':
         # thus to sustain a certain traffic_demand we need a QKD load of:
         lbd = dem*1_000_000*args.key_size/\
           (args.rekey_interval*100_000_000_000*8)
-        print(lbd)
+        
         res = parse_all_graphs(args.files, lbd)
         for line in res:
             d.loc[len(d)] = line + [args.gen_rate/1000_000_000, dem, 
