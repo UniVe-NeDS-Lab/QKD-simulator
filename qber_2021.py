@@ -111,6 +111,7 @@ def generate_plots():
     plt.ylim(1e-9, 1e-2)
     plt.grid(True, which="both", linestyle='--', alpha=0.5)
     
+    
     # Reference thresholds from Section IV-C
     plt.axvline(11.8, color='red', linestyle=':', label='Threshold (11.8 dB)')
     plt.legend()
@@ -123,7 +124,7 @@ def SKR_over_distance():
     
     plt.figure(figsize=(8, 6))
     l = np.linspace(0, 6, 100)
-    plt.plot(l, [calculate_skr(0, dist) for dist in l])
+    plt.semilogy(l, [calculate_skr(0, dist) for dist in l])
     plt.title('Normalized SKR with perfect weather conditions')
     plt.xlabel('Distance (km)')    
     plt.show()

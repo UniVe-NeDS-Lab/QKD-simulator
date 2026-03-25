@@ -176,7 +176,6 @@ def parse_all_graphs(files, lbd):
         sizes.add(int(size))
         graphs[area+size].append(fpath)
     pool = multiprocessing.Pool(processes=args.processes)
-    print(args.processes)
     for area in areas:
         for size in sorted(sizes):
             probs = []
@@ -190,7 +189,8 @@ def parse_all_graphs(files, lbd):
             for (x, prob_dict) in res:
                 probs.extend([p for plist in prob_dict.values() for p in plist])      
                 m, h = mean_confidence_interval(probs) 
-                results.append([area, size, lbd, m, h, len(probs), len(glist)])    
+            results.append([area, size, lbd, m, h, len(probs), 
+                            len(glist), g.graph['max_link_len']])    
     return results
     
 if __name__ == '__main__':
@@ -212,22 +212,27 @@ if __name__ == '__main__':
     parser.add_argument('--key_size', type=int, default=256)
     parser.add_argument('--processes', help='number of parallel processes', 
                         type=int, default=1)
+    parser.add_argument('--save_to', help='dump the dataframe to a file')
 
-
-    
     args = parser.parse_args()
     d = pd.DataFrame(columns=['area', 'size', 'lambda', 'avg', 'CI', 'paths', 
-                              'graphs', 'gen_rate (Gb/s)', 'traffic_demand (Mb/s)', 
+                              'graphs', 'max_link_len' , 'gen_rate (Gb/s)', 
+                              'traffic_demand (Mb/s)', 
                               'rekey_interval (GB)'])
     for dem in args.traffic_demand:
         # every rekey_interval Bytes, we need a key of size key_size, so for 
         # every QKD bit sent, we can carry key_size/rekey_interval*8 
         # thus to sustain a certain traffic_demand we need a QKD load of:
         lbd = dem*1_000_000*args.key_size/\
-          (args.rekey_interval*100_000_000_000*8)
-        
+          (args.rekey_interval*100_000_000_000*8) # lambda in bit/s
+           
+        lbd = lbd/(args.gen_rate)   # the SKR in the graphs is 
+                                    # b/s/pulse, so we normalize
+                                    # by the gen_rate 
         res = parse_all_graphs(args.files, lbd)
         for line in res:
-            d.loc[len(d)] = line + [args.gen_rate/1000_000_000, dem, 
+            d.loc[len(d)] = line + [args.gen_rate/1_000_000_000, dem, 
                                     args.rekey_interval]
     print(d)
+    if args.save_to:
+        d.to_csv(args.save_to)

@@ -139,7 +139,7 @@ def gen_graphs(folder, runs=5000, size=30, fname='', gnumber=0):
     components = filter_edges(adj_file, args.max_len, coord_dict, size)
 
     for g in MDRW(components, size, coord_dict, runs):
-        g.graph.update({'scenario':folder})
+        g.graph.update({'scenario':folder, 'max_link_len':args.max_len})
         for frm, to, data in g.edges(data=True):
             data['length'] =  distance(coord_dict[int(frm)], 
                                       coord_dict[int(to)])
