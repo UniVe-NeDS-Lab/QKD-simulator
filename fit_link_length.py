@@ -148,7 +148,9 @@ def gen_graphs(folder, runs=5000, size=30, fname='', gnumber=0):
             edges.append(data['length'])
         nodes.extend(g.nodes())
         if not args.no_save:
-            nx.write_graphml(g, save_folder + f'/{fname}-ZONE{gnumber}-SIZE{size}-G{str(count)}.graphml')
+            save_f = f'/{fname}-ZONE{gnumber}-SIZE{size}-G{str(count)}-'\
+                f'L{args.max_len}.graphml'
+            nx.write_graphml(g, save_folder + save_f)
         count += 1
     print("Sub graph density:", len(edges)/len(nodes))
 

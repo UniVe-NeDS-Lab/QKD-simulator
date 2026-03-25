@@ -13,6 +13,8 @@ from numpy import linalg as LA
 from scipy import stats
 from collections import defaultdict
 import pandas as pd
+from tqdm.contrib import itertools as tqiter
+
 
 import matplotlib.pyplot as plt
 from matplotlib import rc
@@ -86,8 +88,7 @@ def compute_rhos(g, lambdas, verbose=False, directed=False):
     last_alpha = 1
     if verbose:
         print('Starting graph analysis. Alpha progress: ', end='', flush=True)
-    precision = 6
-    while (LA.norm([oldrhos[k]-rhos[k] for k in rhos],2)>1/10**6):
+    while (LA.norm([oldrhos[k]-rhos[k] for k in rhos],2)>1/args.relax_thr):
         curr_alpha = LA.norm([oldrhos[k]-rhos[k] for k in rhos],2)
         if curr_alpha < last_alpha/10 and verbose:
             last_alpha = curr_alpha
@@ -168,6 +169,7 @@ def parse_all_graphs(files, lbd):
     sizes = set()
     results = []
     graphs = defaultdict(list)
+    tot_nodes = 0
     for fpath in files:
         f = Path(fpath).name
         area = f.split('-')[0]
@@ -175,22 +177,26 @@ def parse_all_graphs(files, lbd):
         areas.add(area)
         sizes.add(int(size))
         graphs[area+size].append(fpath)
+        tot_nodes+=int(size)
     pool = multiprocessing.Pool(processes=args.processes)
-    for area in areas:
-        for size in sorted(sizes):
-            probs = []
-            glist = graphs[area+str(size)]
-            f_args = []
-            for g in glist:
-                g = nx.read_graphml(g)
-                l = set_lambda(g, lbd)
-                f_args.append((g,l))
-            res = pool.starmap(compute_rhos, f_args)
-            for (x, prob_dict) in res:
-                probs.extend([p for plist in prob_dict.values() for p in plist])      
-                m, h = mean_confidence_interval(probs) 
-            results.append([area, size, lbd, m, h, len(probs), 
-                            len(glist), g.graph['max_link_len']])    
+    # add TQDM
+    with tqdm.tqdm(total=tot_nodes, desc="Processed nodes", unit="node") as pbar:
+        for area in areas:
+            for size in sorted(sizes):
+                probs = []
+                glist = graphs[area+str(size)]
+                f_args = []
+                for g in glist:
+                    g = nx.read_graphml(g)
+                    l = set_lambda(g, lbd)
+                    f_args.append((g,l))
+                res = pool.starmap(compute_rhos, f_args)
+                for (x, prob_dict) in res:
+                    probs.extend([p for plist in prob_dict.values() for p in plist])      
+                    m, h = mean_confidence_interval(probs) 
+                results.append([area, size, lbd, m, h, len(probs), 
+                                len(glist), g.graph['max_link_len']])    
+                pbar.update(int(size)*len(glist))
     return results
     
 if __name__ == '__main__':
@@ -213,12 +219,15 @@ if __name__ == '__main__':
     parser.add_argument('--processes', help='number of parallel processes', 
                         type=int, default=1)
     parser.add_argument('--save_to', help='dump the dataframe to a file')
+    parser.add_argument('--relax_thr', help=' inverse of the threshold used'
+                        ' for the equation relaxation', default=10**6, 
+                        type=int)
 
     args = parser.parse_args()
     d = pd.DataFrame(columns=['area', 'size', 'lambda', 'avg', 'CI', 'paths', 
                               'graphs', 'max_link_len' , 'gen_rate (Gb/s)', 
                               'traffic_demand (Mb/s)', 
-                              'rekey_interval (GB)'])
+                              'rekey_interval (GB)', 'relax_thr'])
     for dem in args.traffic_demand:
         # every rekey_interval Bytes, we need a key of size key_size, so for 
         # every QKD bit sent, we can carry key_size/rekey_interval*8 
@@ -232,7 +241,7 @@ if __name__ == '__main__':
         res = parse_all_graphs(args.files, lbd)
         for line in res:
             d.loc[len(d)] = line + [args.gen_rate/1_000_000_000, dem, 
-                                    args.rekey_interval]
+                                    args.rekey_interval, args.relax_thr]
     print(d)
     if args.save_to:
         d.to_csv(args.save_to)
