@@ -1,138 +1,217 @@
-#! /usr/bin/env python3 
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 
 import numpy as np
 import matplotlib.pyplot as plt
+from scipy.special import gamma, kv
+from scipy.integrate import quad
+from scipy.optimize import root_scalar
 
-# --- 1. Parameters (As per Table 1 and Section IV) ---
-# Naming conventions follow the paper's symbols exactly
-eta_det = 0.10            # Quantum efficiency of detectors
-V = 0.98                  # Visibility
-e_det = (1 - V) / 2       # Intrinsic detector error (0.01)
-f_e = 1.2                 # Error correction efficiency f(E_mu)
-q = 1/3                   # Protocol efficiency
-mu = 0.439                # Signal state mean photon number
-nu = 0.11                 # Decoy state mean photon number
+# =====================================================================
+# QKD SYSTEM DEFINITION (Strict Paper Parameters)
+# =====================================================================
 
-# Background Noise
-# Total solar radiance counts + dark counts = 51000 cps
-# y0 is probability per gate (1ns)
-y0 = 51000 * 1e-9         
-
-# Hardware/Fixed Losses (dB)
-L_Bob = 2.65
-L_filter = 3.0
-L_housing = 1.5
-L_misalign = 0.5
-L_fixed_total = L_Bob + L_filter + L_housing + L_misalign # 7.65 dB
-
-# Geometrical Parameters (Section IV-B)
-D_t = 0.05                # Transmitter aperture diameter (m)
-a_r = 0.18                # Receiver aperture diameter (m)
-theta = 0.182e-3          # Full beam divergence angle (rad)
-
-def h2(x):
-    """Binary Shannon entropy H(x)."""
-    if x <= 0 or x >= 1: return 0
-    return -x * np.log2(x) - (1 - x) * np.log2(1 - x)
-
-def calculate_skr(L_atm_add, dist=0.3):
-    """
-    Calculates SKR/frep using the exact conventions of the paper.
-    
-    Args:
-        L_atm_add: Additional atmospheric attenuation (dB). If zero, we assume
-        perfect weather
-        dist: Distance in km (default 0.3 km for Fig 2)
-    """
-    # --- Equation (2): Geometrical Loss ---
-    # This takes into account the fact that the beam enlarges
-    # and some photons never reach the receiver
-    d_s = D_t + 2 * (dist * 1000) * np.tan(theta / 2)
+class NtanosFSO_QKD:
+    def __init__(self):
+        # Explicitly stated
+        self.wavelength = 1550e-9        
+        self.d_t = 0.05                  
+        self.a_r = 0.18                  
+        self.theta = 182e-6              
+        self.alpha_clear = 0.192         
         
-    if a_r >= d_s: # if the beam is still lower than the receiver
-        a_geo_db = 0
+        self.mu = 0.439                  
+        self.nu = 0.11                   
+        self.f_ec = 1.2                  
+        self.e_opt = 0.01                
+        self.rho_ap = 0.008              
+        self.e0 = 0.5                    
+        
+        # Guessed / Assumed baseline hardware losses
+        self.L_sys = 17.65 
+        self.q = 0.5                     
+        self.t_gate = 1e-9
+        self.Y0 = 51000 * self.t_gate 
+
+    def H2(self, x):
+        x = np.clip(x, 1e-15, 1 - 1e-15)
+        return -x * np.log2(x) - (1 - x) * np.log2(1 - x)
+
+    def get_A_geo(self, L):
+        d_s = self.d_t + 2 * L * np.tan(self.theta / 2)
+        return np.where(self.a_r > d_s, 0.0, 20 * np.log10(d_s / self.a_r))
+
+    def calculate_skr(self, L, A_add):
+        total_loss_dB = self.get_A_geo(L) + (self.alpha_clear * (L/1000.0)) + self.L_sys + A_add
+        eta = 10 ** (-total_loss_dB / 10)
+        
+        Q_mu_raw = self.Y0 + 1 - np.exp(-eta * self.mu)
+        Q_mu = Q_mu_raw * (1 + self.rho_ap)
+        E_mu = (self.e0 * self.Y0 + self.e_opt * (1 - np.exp(-eta * self.mu)) + 0.5 * self.rho_ap * Q_mu_raw) / Q_mu
+        
+        Q_nu_raw = self.Y0 + 1 - np.exp(-eta * self.nu)
+        Q_nu = Q_nu_raw * (1 + self.rho_ap)
+        E_nu = (self.e0 * self.Y0 + self.e_opt * (1 - np.exp(-eta * self.nu)) + 0.5 * self.rho_ap * Q_nu_raw) / Q_nu
+        
+        term1 = Q_nu * np.exp(self.nu)
+        term2 = Q_mu * np.exp(self.mu) * (self.nu**2 / self.mu**2)
+        term3 = (self.mu**2 - self.nu**2) / self.mu**2 * self.Y0
+        
+        Y1_L = (self.mu / (self.mu * self.nu - self.nu**2)) * (term1 - term2 - term3)
+        Y1_L = np.maximum(Y1_L, 1e-15) 
+        Q1_L = Y1_L * self.mu * np.exp(-self.mu)
+        
+        e1_U = (E_nu * Q_nu * np.exp(self.nu) - self.e0 * self.Y0) / (self.nu * Y1_L)
+        e1_U = np.clip(e1_U, 1e-15, 0.5)
+        
+        R = self.q * (Q1_L * (1 - self.H2(e1_U)) - Q_mu * self.f_ec * self.H2(E_mu))
+        return np.maximum(R, 1e-15)
+
+# =====================================================================
+# ORIGINAL SCALAR WEATHER FUNCTIONS
+# =====================================================================
+
+def get_scattering_loss(visibility_km, lambda_nm=1550):
+    if visibility_km > 50:
+        q = 1.6
+    elif visibility_km > 6:
+        q = 1.3
+    elif visibility_km > 1:
+        q = 0.16 * visibility_km + 0.34
+    elif visibility_km > 0.5:
+        q = visibility_km - 0.5
     else:
-        # Paper uses log10(a_r/d_s). 
-        # Since a_r < d_s, this log is negative.
-        a_geo_db = 20 * np.log10(a_r / d_s)
-    
-    # --- Equation (3): 
-    # loss due to clean air. As the authors say, equation simplifies to a simple 
-    # multiplication 
-    a_clear_db = 0.192 * dist # Negative value representing gain/loss
-    
-    # --- Total Transmittance η (eta) ---
-    # We combine all the loss components in dB 
-    total_attenuation_db = a_geo_db -  a_clear_db - L_fixed_total - L_atm_add
-    
-    
-    eta_ch = 10**(total_attenuation_db / 10)
-    eta = eta_ch * eta_det
-    
-    # What follows comes from a citation in the paper, Ma et al. 
-    # --- Yields and Gains (Decoy State BB84) ---
-    Q_mu = y0 + 1 - np.exp(-mu * eta) # eq. 10 Ma et al
-    Q_nu = y0 + 1 - np.exp(-nu * eta) 
-    
-    # Single-photon yield Y1 (Ma et al. bound)
-    Y1 = (mu / (mu * nu - nu**2)) * (
-        Q_nu * np.exp(nu) - Q_mu * np.exp(mu) * (nu / mu)**2 - y0 * (1 - (nu / mu)**2)
-    )
-    Q1 = Y1 * mu * np.exp(-mu)
-    
-    # --- Error Rates ---
-    # E_mu (QBER) and e1 (Single-photon error rate)
-    E_mu = (0.5 * y0 + e_det * (1 - np.exp(-mu * eta))) / Q_mu # (eq. 11 Ma et al)
-    e1 = (0.5 * y0 + e_det * Y1 * eta) / Y1 if Y1 > 0 else 0.5 
-    
-    # --- Equation (1): Secure Key Rate ---
-    # R >= q * { Q1 * [1 - H(e1)] - Q_mu * f(E_mu) * H(E_mu) }
-    R = q * (Q1 * (1 - h2(e1)) - Q_mu * f_e * h2(E_mu))
-    
-    if R < 1e-10:
+        q = 0.0
+    return (17.0 / visibility_km) * (lambda_nm / 550.0)**(-q)
+
+def get_rain_loss(rain_rate_mm_hr):
+    if rain_rate_mm_hr <= 0:
         return 0.0
-    return R 
+    return 1.1394 * (rain_rate_mm_hr ** 0.7057)
 
-# --- Execution and Plotting ---
 
-def generate_plots():
-    # Fig 2 reproduction: 300m link
-    L_atm_axis = np.linspace(0, 14, 100)
-    rates = [calculate_skr(L) for L in L_atm_axis]
+def get_turbulence_margin(L_m, Cn2, p_outage=0.01, wavelength=1550e-9, a_r=0.18):
+    if Cn2 <= 1e-17 or L_m < 10:
+        return 0.0
+        
+    k_wave = 2 * np.pi / wavelength
+    sigma_r2 = 1.23 * Cn2 * (k_wave**(7/6)) * (L_m**(11/6))
+    d = np.sqrt((k_wave * a_r**2) / (4 * L_m))
     
+    term_a = 0.49 * sigma_r2 / (1 + 0.18 * d**2 + 0.56 * sigma_r2**(12/5))**(7/6)
+    a = (np.exp(term_a) - 1)**-1
+    term_b = 0.51 * sigma_r2 * (1 + 0.69 * sigma_r2**(12/5))**(-5/6) / (1 + 0.9 * d**2 + 0.62 * sigma_r2**(12/5))**(5/6)
+    b = (np.exp(term_b) - 1)**-1
+    
+    # FIX: Intercept weak turbulence/high aperture averaging before gamma() overflows.
+    # If a or b > 150, the variance is practically zero. The margin is 0 dB.
+    if a > 150 or b > 150:
+        return 0.0
+    
+    def pdf(I):
+        if I <= 0: return 0.0
+        val = 2 * (a * b)**((a + b) / 2) / (gamma(a) * gamma(b)) * I**((a + b) / 2 - 1) * kv(a - b, 2 * np.sqrt(a * b * I))
+        return np.nan_to_num(val, nan=0.0, posinf=0.0)
+
+    try:
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            sol = root_scalar(lambda I_th: quad(pdf, 0, I_th, limit=200)[0] - p_outage, 
+                              bracket=[1e-20, 10], method='brentq')
+        return -10 * np.log10(sol.root)
+    except:
+        # FIX: Only returns 100 dB loss if the integration fails due to true, extreme fading.
+        return 100.0
+
+# =====================================================================
+# MAIN WRAPPER FUNCTION
+# =====================================================================
+
+def get_skr(L, A_add=None, V=50.0, rain=0.0, Cn2=1e-17, p_outage=0.01):
+    model = NtanosFSO_QKD()
+    
+    if A_add is not None:
+        return model.calculate_skr(L, A_add)
+        
+    else:
+        L_km = L / 1000.0
+        total_A_add = (get_scattering_loss(V) * L_km + 
+                       get_rain_loss(rain) * L_km + 
+                       get_turbulence_margin(L, Cn2, p_outage))
+        return model.calculate_skr(L, total_A_add)
+
+
+def get_max_distance(V, rain, Cn2):
+    """ Return the maximum distance at which we have a reasonable SKR 
+    given certain weather conditions """
+    L = 100
+    while True:    
+        skr = get_skr(L, V=V, rain=rain, Cn2=Cn2)
+        if skr < 10**(-9): # we assume GHz generation of photons, so 
+                           # if SKR is < 1/s the link is unusable
+            return L-100
+        L += 100
+
+# =====================================================================
+# PLOTTING FUNCTIONS
+# =====================================================================
+
+def plot_figure_2():
+    """Sweeps A_add from 0 to 15 dB at L = 300m to recreate Figure 2."""
+    A_add_sweep = np.linspace(0, 15, 200)
+    
+    # Calculate SKR for the sweep using the override mode
+    skr_results = get_skr(L=300.0, A_add=A_add_sweep)
+    
+    # Plot formatting
     plt.figure(figsize=(8, 6))
-    plt.semilogy(L_atm_axis, rates, color='blue', linewidth=2, label='Simulation')
+    plt.semilogy(A_add_sweep, skr_results, 'k-', linewidth=2, label="Calculated SKR")
+    plt.title('Figure 2 Recreation (Strict Paper Parameters, L=300m)')
+    plt.xlabel('Additional Atmospheric Attenuation $A_{add}$ (dB)')
+    plt.ylabel('Normalized SKR (bits/pulse)')
     
-    # Aesthetics to match the paper style
-    plt.title("Secure Key Rate per Pulse vs Additional Attenuation")
-    plt.xlabel("Additional Atmospheric Attenuation (dB)")
-    plt.ylabel("SKR / $f_{rep}$")
-    plt.xlim(0, 14)
-    plt.ylim(1e-9, 1e-2)
-    plt.grid(True, which="both", linestyle='--', alpha=0.5)
+    # Limit to paper's visual bounds
+    plt.ylim(1e-8, 1e-2)
+    plt.xlim(0, 12)
     
-    
-    # Reference thresholds from Section IV-C
-    plt.axvline(11.8, color='red', linestyle=':', label='Threshold (11.8 dB)')
+    plt.grid(True, which="both", ls="--", alpha=0.6)
     plt.legend()
     plt.show()
-    
- 
-    
 
-def SKR_over_distance():
+def plot_skr_vs_distance():
+    """Sweeps L from 100m to 3000m for three different weather conditions."""
+    L_sweep = np.linspace(100, 5000, 50) 
     
-    plt.figure(figsize=(8, 6))
-    l = np.linspace(0, 6, 100)
-    plt.semilogy(l, [calculate_skr(0, dist) for dist in l])
-    plt.title('Normalized SKR with perfect weather conditions')
-    plt.xlabel('Distance (km)')    
+    skr_best = []
+    skr_mod = []
+    skr_bad = []
+    
+    for L in L_sweep:
+        skr_best.append(get_skr(L, V=50.0, rain=0.0, Cn2=1e-17))
+        skr_mod.append(get_skr(L, V=5.0,  rain=10.0, Cn2=1e-15))
+        skr_bad.append(get_skr(L, V=2,  rain=20.0, Cn2=1e-14))
+    
+    # Plotting
+    plt.figure(figsize=(9, 6))
+    
+    plt.semilogy(L_sweep, skr_best, 'g-', linewidth=2, label="Best Case (Clear, Cn2=1e-17)")
+    plt.semilogy(L_sweep, skr_mod,  'b--', linewidth=2, label="Moderate (Haze, Cn2=1e-15)")
+    plt.semilogy(L_sweep, skr_bad,  'r-.', linewidth=2, label="Worst Case (Fog+Rain, Cn2=1e-14)")
+    
+    plt.title('Normalized SKR vs Link Distance Under Different Weather Conditions')
+    plt.xlabel('Link Distance $L$ (meters)')
+    plt.ylabel('Normalized SKR (bits/pulse)')
+    
+    plt.ylim(1e-8, 1e-2)
+    plt.xlim(100, 5000)
+    plt.grid(True, which="both", ls="--", alpha=0.6)
+    plt.legend()
     plt.show()
-    print("#Normalized SKR over distance (km)")
-    print("d SKR")
-    for i in range(len(l)):
-        print(l[i], calculate_skr(0, l[i]))
 
 if __name__ == "__main__":
-    generate_plots()
-    SKR_over_distance()
+    print("Generating Figure 2 recreation...")
+    plot_figure_2()
+    
+    print("Generating SKR vs Distance plot...")
+    plot_skr_vs_distance()

@@ -14,6 +14,7 @@ from scipy import stats
 from collections import defaultdict
 import pandas as pd
 from tqdm.contrib import itertools as tqiter
+import os
 
 
 import matplotlib.pyplot as plt
@@ -23,6 +24,8 @@ import tqdm
 import argparse 
 from pathlib import Path
 import multiprocessing
+import time
+import cProfile
 
 nodes = 10
 
@@ -62,10 +65,11 @@ def psi(s, d, rhos, lambdas, g):
     rho, and the graph g from which we obtain gammas """
     t = 0.0 
     for start in g.nodes():
+        paths = nx.single_source_shortest_path(g, start)
         for stop in g.nodes():
             if start == stop:
                 continue
-            path = nx.shortest_path(g, start, stop)
+            path = paths[stop] #nx.shortest_path(g, start, stop)
             edges = [(path[i],path[i+1]) for i in range(len(path)-1)]
             if (s,d) not in edges and (d,s) not in edges:
                 continue
@@ -83,6 +87,8 @@ def compute_rhos(g, lambdas, verbose=False, directed=False):
     oldrhos = dict.fromkeys(rhos.keys(), 0)
     #relaxation coefficient
     alpha = 0.1
+    profiler = cProfile.Profile()
+    profiler.enable()
 
     # this is approximating rho, eq. 2
     last_alpha = 1
@@ -119,6 +125,10 @@ def compute_rhos(g, lambdas, verbose=False, directed=False):
             for edge in edges:
                 prob = prob*rhos[sedge(edge)]
             prob_dict[lpath].append(prob) 
+    profiler.disable()
+    # Save stats with the Process ID (PID) in the filename
+    stats_file = f"profile_pid_{os.getpid()}.stats"
+    profiler.dump_stats(stats_file)
     return rhos, prob_dict
 
 def plot_graphs(g, rhos, prob_dict):
@@ -164,6 +174,40 @@ def mean_confidence_interval(data, confidence=0.95):
     
     return m, h
 
+def compute_combined_estimate(means, variances, confidence=0.95):
+    """
+    Takes a list of means, and variances measured on different graphs. 
+    Computes the grand mean and confidence interval using Inverse-Variance 
+    Weighting:https://en.wikipedia.org/wiki/Inverse-variance_weighting
+    That is, compute the comulative mean and variance, then compute the CI.
+    
+    Default z_score is 1.96 (for a 95% Confidence Interval).
+    Use 1.645 for 90% CI, or 2.576 for 99% CI.
+    """
+    # 1. Calculate the weight for each run, adds a minimum variance
+    # because there could be rare full-meshes, in which the probs 
+    # are all the same, so zero variance
+    epsilon = 1e-10  # A very small number
+    weights = 1.0 / (np.array(variances) + epsilon)
+    
+    # 2. Compute the weighted Grand Mean
+    grand_mean = np.sum(weights * np.array(means)) / np.sum(weights)
+    
+    # 3. Compute the combined variance and Standard Error
+    combined_variance = 1.0 / np.sum(weights) # this decreases with len(means)
+    standard_error = np.sqrt(combined_variance)
+    
+    h = standard_error * stats.t.ppf((1 + confidence) / 2, len(means)-1)
+    
+    return grand_mean, h 
+
+def max_demand_per_link(avg_SKR, key_size, rekey_interval, rate):
+    """ This function computes the allowed demand per link in average,
+    Returns Mb/s"""
+    keys_per_sec = avg_SKR/key_size
+    bps_per_link = rate*keys_per_sec*rekey_interval*10**9*8 
+    return bps_per_link/1_000_000 # returns Mb/s
+
 def parse_all_graphs(files, lbd):
     areas = set()
     sizes = set()
@@ -173,31 +217,81 @@ def parse_all_graphs(files, lbd):
     for fpath in files:
         f = Path(fpath).name
         area = f.split('-')[0]
-        size = f.split('-')[2][4:]
+        size = f.split('-')[2][4:] 
         areas.add(area)
         sizes.add(int(size))
         graphs[area+size].append(fpath)
         tot_nodes+=int(size)
-    pool = multiprocessing.Pool(processes=args.processes)
+
     # add TQDM
-    with tqdm.tqdm(total=tot_nodes, desc="Processed nodes", unit="node") as pbar:
+    args_list = []
+    res_list = []
+    f_args = []
+    res = []
+    with tqdm.tqdm(total=tot_nodes, desc="Processed graphs", unit="graphs") as pbar:
         for area in areas:
             for size in sorted(sizes):
+                pbar.set_description(f"Area: {area}, Size: {size}")
                 probs = []
                 glist = graphs[area+str(size)]
-                f_args = []
                 for g in glist:
                     g = nx.read_graphml(g)
                     l = set_lambda(g, lbd)
                     f_args.append((g,l))
-                res = pool.starmap(compute_rhos, f_args)
-                for (x, prob_dict) in res:
-                    probs.extend([p for plist in prob_dict.values() for p in plist])      
-                    m, h = mean_confidence_interval(probs) 
-                results.append([area, size, lbd, m, h, len(probs), 
-                                len(glist), g.graph['max_link_len']])    
-                pbar.update(int(size)*len(glist))
-    return results
+                    mean_SKR = np.mean([e[2]['SKR'] for e in g.edges(data=True)])
+                    res_list.append([area, size, lbd, 0, 0,  
+                                    len(glist), mean_SKR, 
+                                    g.graph['max_link_len']])
+                    if args.processes == 1:
+                        res.append(compute_rhos(g,l))
+                        pbar.update(len(g))
+    if args.processes > 1:
+        with multiprocessing.Pool(processes=args.processes) as pool:
+            res = pool.starmap_async(compute_rhos, f_args)
+        
+            with tqdm.tqdm(total=tot_nodes, desc="Processed graphs", 
+                           unit="graphs") as pbar:
+                while not res.ready():
+                    remaining = res._number_left # hack
+                    pbar.n = len(f_args) - remaining
+                    pbar.refresh()
+                    area = res_list[pbar.n][0]
+                    size = res_list[pbar.n][1]
+                    pbar.set_description(f"Area: {area}, Size: {size}")
+                    time.sleep(1)
+            
+            res = res.get()
+    for i in range(len(res)):
+        _, prob_dict = res[i]
+
+        probs = [p for plist in prob_dict.values() for p in plist]
+        m = np.mean(probs)
+        var = np.var(probs, ddof=1) # sample variance 
+        res_list[i][3] = m
+        res_list[i][4] = var
+    temp_df = pd.DataFrame(res_list, 
+                           columns=df_columns) 
+    
+    res_df = pd.DataFrame(columns=df_columns)
+    group_by_fields = ['area', 'size', 'lambda', 'max_link_len']
+    grouped = temp_df.groupby(group_by_fields)
+    print(temp_df)
+    for (condition, group) in grouped:
+        # condition is the list of values that created the group
+        mean = group['avg'].tolist()
+        var = group['CI'].tolist() # note there is a bad hack here. the CI
+                                   # column is used to store the variance in the
+                                   # temporary datafame, then we reset it to CI
+        combined_mean, h = compute_combined_estimate(mean, var)
+        new_row_dict = dict(zip(group_by_fields, condition))
+        new_row_dict['avg'] = combined_mean
+        new_row_dict['CI'] = h     # here we reset it
+        new_row_dict['graphs'] = len(group)
+        new_row_dict['avg_SKR'] = np.mean(group['avg_SKR'])        
+    
+        res_df = pd.concat([res_df, pd.DataFrame([new_row_dict])])
+        #[area, size, lbd, m, h, len(glist), g.graph['max_link_len']]    
+    return res_df
     
 if __name__ == '__main__':
     """ graph g is expected to have a link attribute 'SKR' that contains 
@@ -213,7 +307,7 @@ if __name__ == '__main__':
     parser.add_argument('--traffic_demand', type=int, default=[100],
                         help="The actual traffic demand between every couple "
                         "of nodes (Mb/s). List is supported", nargs='+')
-    parser.add_argument('--rekey_interval', type=int, default=100,
+    parser.add_argument('--rekey_interval', type=float, default=100,
                         help="The interval between rekeys (GB).")
     parser.add_argument('--key_size', type=int, default=256)
     parser.add_argument('--processes', help='number of parallel processes', 
@@ -224,24 +318,46 @@ if __name__ == '__main__':
                         type=int)
 
     args = parser.parse_args()
-    d = pd.DataFrame(columns=['area', 'size', 'lambda', 'avg', 'CI', 'paths', 
-                              'graphs', 'max_link_len' , 'gen_rate (Gb/s)', 
-                              'traffic_demand (Mb/s)', 
-                              'rekey_interval (GB)', 'relax_thr'])
+    
+    df_columns = ['area', 'size', 'lambda', 'avg', 'CI', 
+                  'graphs', 'avg_SKR', 'max_link_len']
+    res_d = pd.DataFrame()
+    
+    if args.save_to:
+        # Remove the file if it exists to start fresh
+        if os.path.exists(args.save_to):
+            os.remove(args.save_to)
+            print(f"Existing {args.save_to} removed. Starting fresh.")
     for dem in args.traffic_demand:
         # every rekey_interval Bytes, we need a key of size key_size, so for 
         # every QKD bit sent, we can carry key_size/rekey_interval*8 
         # thus to sustain a certain traffic_demand we need a QKD load of:
         lbd = dem*1_000_000*args.key_size/\
-          (args.rekey_interval*100_000_000_000*8) # lambda in bit/s
+          (args.rekey_interval*1_000_000_000*8) # lambda in bit/s
            
         lbd = lbd/(args.gen_rate)   # the SKR in the graphs is 
                                     # b/s/pulse, so we normalize
                                     # by the gen_rate 
-        res = parse_all_graphs(args.files, lbd)
-        for line in res:
-            d.loc[len(d)] = line + [args.gen_rate/1_000_000_000, dem, 
-                                    args.rekey_interval, args.relax_thr]
+        d = parse_all_graphs(args.files, lbd)
+        d['gen_rate (Gb/s)'] = args.gen_rate/1_000_000_000
+        d['traffic_demand (Mb/s)'] = dem
+        d['rekey_interval (GB)'] = args.rekey_interval
+        d['relax_thr'] = args.relax_thr
+        d['key_size'] = args.key_size
+        d['max_demand_per_link (Mb/s)'] = d.apply(lambda r:\
+                                        max_demand_per_link(r['avg_SKR'], 
+                                            r['key_size'], 
+                                            r['rekey_interval (GB)'], 
+                                            args.gen_rate), axis=1)
+        res_d = pd.concat([res_d, d], ignore_index=True)
+            
+        if args.save_to:
+            write_header = not os.path.exists(args.save_to)
+    
+            res_d.to_csv(args.save_to, 
+                      mode='a',             # append
+                      index=False, 
+                      header=write_header,  # Only True for the first write
+                      encoding='utf-8')
     print(d)
-    if args.save_to:
-        d.to_csv(args.save_to)
+           

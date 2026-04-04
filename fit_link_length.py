@@ -11,8 +11,9 @@ import time
 import os
 import glob
 from qber import FSOQKD
-from qber_2021 import calculate_skr
+from qber_2021 import get_skr, get_max_distance
 import random
+import math
 
 rural_list = ['visibility_graphs/rural1/', 'visibility_graphs/rural2/', 
                'visibility_graphs/rural3/']
@@ -114,7 +115,7 @@ def MDRW(components, sample_size, coord_dict, ngraphs=1,
     return graphs
 
 
-def gen_graphs(folder, runs=5000, size=30, fname='', gnumber=0):
+def gen_graphs(folder, folder_number, runs=5000, size=30, fname=''):
     adj_file = folder + "/intervisibility.adj" 
     position_file  = folder + "/best_p.csv"
     print('Opening folder:', folder)
@@ -139,16 +140,17 @@ def gen_graphs(folder, runs=5000, size=30, fname='', gnumber=0):
     components = filter_edges(adj_file, args.max_len, coord_dict, size)
 
     for g in MDRW(components, size, coord_dict, runs):
-        g.graph.update({'scenario':folder, 'max_link_len':args.max_len})
+        g.graph.update({'scenario':folder, 'max_link_len':args.max_len, 
+                        'weather':args.weather})
         for frm, to, data in g.edges(data=True):
             data['length'] =  distance(coord_dict[int(frm)], 
                                       coord_dict[int(to)])
             #data['SKR'] = fso.get_rate(data['length'], 1)[3]
-            data['SKR'] = calculate_skr(0, data['length']/1000) # convert to km
+            data['SKR'] = get_skr(data['length']/1000, V=V, rain=rain, Cn2=Cn2) 
             edges.append(data['length'])
         nodes.extend(g.nodes())
         if not args.no_save:
-            save_f = f'/{fname}-ZONE{gnumber}-SIZE{size}-G{str(count)}-'\
+            save_f = f'/{fname}-AREA{folder_number}-SIZE{size}-G{count}-'\
                 f'L{args.max_len}.graphml'
             nx.write_graphml(g, save_folder + save_f)
         count += 1
@@ -212,10 +214,26 @@ if __name__ == '__main__':
     parser.add_argument('--max_len', type=int, help='Maximum link length (m)', 
                         default = 0)
     parser.add_argument('--results_folder', default='./results/')
+    parser.add_argument('--weather', choices=['BAD', 'AVG', 'GOOD'], 
+                        default='AVG')
  
     args = parser.parse_args()
 
+    if args.weather == 'GOOD':
+        V=50.0    # visibility (km)
+        rain=0.0  # rain (mm/hour)
+        Cn2=1e-17
+    elif args.weather == 'AVG':
+        V=20.0
+        rain=5.0
+        Cn2=1e-15
+    else:
+        V=2.0
+        rain=10.0
+        Cn2=1e-14
 
+    if not args.max_len:
+        args.max_len = get_max_distance(V, rain, Cn2)
     try:
         os.mkdir(args.results_folder)
     except OSError:
@@ -266,10 +284,19 @@ if __name__ == '__main__':
             pool = multiprocessing.Pool(processes=args.processes)
             arguments = []
             gnumber = 0
-            for folder in area:
-                fname = ''.join(folder.split('/')[-2][:-1])
-                arguments.append([folder, max(int(runs/len(area)), 1), size, fname, gnumber])
-                gnumber += 1
+            runs_per_area = max(math.ceil(runs/len(area)), 1)
+            if int(runs/len(area)) != math.ceil(runs/len(area)):
+                print('WARNING: if runs is not a multiple of 3 (areas) the'
+                      ' generated graphs are not balanced across the areas')
+            for i in range(len(area)):
+                folder = area[i]
+                fname = ''.join(folder.split('/')[-2][:-1])    
+                if gnumber + runs_per_area > runs:
+                    runs_per_area = runs-gnumber
+                    arguments.append([folder, i, runs_per_area, size, fname])
+                    break
+                arguments.append([folder, i, runs_per_area, size, fname])
+                gnumber += runs_per_area
                 if gnumber == runs:
                     break
             for e in pool.starmap(gen_graphs, arguments):
