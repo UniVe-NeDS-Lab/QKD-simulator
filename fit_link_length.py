@@ -11,7 +11,7 @@ import time
 import os
 import glob
 from qber import FSOQKD
-from qber_2021 import get_skr, get_max_distance
+from qber_2021 import get_skr, get_max_distance, weather_profiles
 import random
 import math
 
@@ -141,12 +141,13 @@ def gen_graphs(folder, folder_number, runs=5000, size=30, fname=''):
 
     for g in MDRW(components, size, coord_dict, runs):
         g.graph.update({'scenario':folder, 'max_link_len':args.max_len, 
-                        'weather':args.weather})
+                        'weather':args.weather, **weather_profiles[args.weather]})
         for frm, to, data in g.edges(data=True):
             data['length'] =  distance(coord_dict[int(frm)], 
                                       coord_dict[int(to)])
             #data['SKR'] = fso.get_rate(data['length'], 1)[3]
-            data['SKR'] = get_skr(data['length']/1000, V=V, rain=rain, Cn2=Cn2) 
+            for conditions in weather_profiles.keys():
+                data[f'SKR-{conditions}'] = get_skr(data['length'], **weather_profiles[conditions]) 
             edges.append(data['length'])
         nodes.extend(g.nodes())
         if not args.no_save:
@@ -214,26 +215,15 @@ if __name__ == '__main__':
     parser.add_argument('--max_len', type=int, help='Maximum link length (m)', 
                         default = 0)
     parser.add_argument('--results_folder', default='./results/')
-    parser.add_argument('--weather', choices=['BAD', 'AVG', 'GOOD'], 
+    parser.add_argument('--weather', choices=['BAD', 'AVG', 'GOOD', 'EXTREME'], 
                         default='AVG')
  
     args = parser.parse_args()
-
-    if args.weather == 'GOOD':
-        V=50.0    # visibility (km)
-        rain=0.0  # rain (mm/hour)
-        Cn2=1e-17
-    elif args.weather == 'AVG':
-        V=20.0
-        rain=5.0
-        Cn2=1e-15
-    else:
-        V=2.0
-        rain=10.0
-        Cn2=1e-14
-
+    
+    
+    
     if not args.max_len:
-        args.max_len = get_max_distance(V, rain, Cn2)
+        args.max_len = get_max_distance(**weather_profiles[args.weather])
     try:
         os.mkdir(args.results_folder)
     except OSError:

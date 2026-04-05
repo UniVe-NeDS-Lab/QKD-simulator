@@ -15,7 +15,7 @@ from collections import defaultdict
 import pandas as pd
 from tqdm.contrib import itertools as tqiter
 import os
-
+from qber_2021 import weather_profile
 
 import matplotlib.pyplot as plt
 from matplotlib import rc
@@ -87,9 +87,9 @@ def compute_rhos(g, lambdas, verbose=False, directed=False):
     oldrhos = dict.fromkeys(rhos.keys(), 0)
     #relaxation coefficient
     alpha = 0.1
-    profiler = cProfile.Profile()
-    profiler.enable()
-
+    #profiler = cProfile.Profile()
+    #profiler.enable()
+    skr_string = f'SKR-{args.weather}'
     # this is approximating rho, eq. 2
     last_alpha = 1
     if verbose:
@@ -103,7 +103,7 @@ def compute_rhos(g, lambdas, verbose=False, directed=False):
         oldrhos = rhos.copy()
         for s,d in g.edges():
             # see the comment on sorted edges in psi()
-                rhos[sedge(s,d)]  = alpha * min(1.0, g.edges[s,d]['SKR']/psi(s, d, oldrhos, lambdas, g)) + (1-alpha)*oldrhos[sedge(s,d)]
+                rhos[sedge(s,d)]  = alpha * min(1.0, g.edges[s,d][skr_string]/psi(s, d, oldrhos, lambdas, g)) + (1-alpha)*oldrhos[sedge(s,d)]
     if verbose:
         print()
     r = []
@@ -125,10 +125,10 @@ def compute_rhos(g, lambdas, verbose=False, directed=False):
             for edge in edges:
                 prob = prob*rhos[sedge(edge)]
             prob_dict[lpath].append(prob) 
-    profiler.disable()
+    #profiler.disable()
     # Save stats with the Process ID (PID) in the filename
     stats_file = f"profile_pid_{os.getpid()}.stats"
-    profiler.dump_stats(stats_file)
+    #profiler.dump_stats(stats_file)
     return rhos, prob_dict
 
 def plot_graphs(g, rhos, prob_dict):
@@ -183,13 +183,17 @@ def compute_combined_estimate(means, variances, confidence=0.95):
     
     Default z_score is 1.96 (for a 95% Confidence Interval).
     Use 1.645 for 90% CI, or 2.576 for 99% CI.
+    
+    Actually, I am not using this anymore. Since every average is weighted
+    by its variance, the runs with high variance count less in the weighted
+    average. This is OK if you imagine these are runs with less confidence
+    but in this case they are just runs with reasonably varying results. 
     """
     # 1. Calculate the weight for each run, adds a minimum variance
     # because there could be rare full-meshes, in which the probs 
     # are all the same, so zero variance
-    epsilon = 1e-10  # A very small number
+    epsilon = 1e-10  # A very small number to avoid zero division
     weights = 1.0 / (np.array(variances) + epsilon)
-    
     # 2. Compute the weighted Grand Mean
     grand_mean = np.sum(weights * np.array(means)) / np.sum(weights)
     
@@ -228,7 +232,9 @@ def parse_all_graphs(files, lbd):
     res_list = []
     f_args = []
     res = []
+    skr_weather = f'SKR-{args.weather}'
     with tqdm.tqdm(total=tot_nodes, desc="Processed graphs", unit="graphs") as pbar:
+        """ prepare the list of results that will be put in a DF """
         for area in areas:
             for size in sorted(sizes):
                 pbar.set_description(f"Area: {area}, Size: {size}")
@@ -238,7 +244,7 @@ def parse_all_graphs(files, lbd):
                     g = nx.read_graphml(g)
                     l = set_lambda(g, lbd)
                     f_args.append((g,l))
-                    mean_SKR = np.mean([e[2]['SKR'] for e in g.edges(data=True)])
+                    mean_SKR = np.mean([e[2][skr_weather] for e in g.edges(data=True)])
                     res_list.append([area, size, lbd, 0, 0,  
                                     len(glist), mean_SKR, 
                                     g.graph['max_link_len']])
@@ -259,38 +265,36 @@ def parse_all_graphs(files, lbd):
                     size = res_list[pbar.n][1]
                     pbar.set_description(f"Area: {area}, Size: {size}")
                     time.sleep(1)
-            
             res = res.get()
-    for i in range(len(res)):
+    temp_df = pd.DataFrame(columns=df_columns) 
+    
+    for i in range(len(res_list)):
         _, prob_dict = res[i]
-
+        line = res_list[i]
+        new_res = []
+        
         probs = [p for plist in prob_dict.values() for p in plist]
-        m = np.mean(probs)
-        var = np.var(probs, ddof=1) # sample variance 
-        res_list[i][3] = m
-        res_list[i][4] = var
-    temp_df = pd.DataFrame(res_list, 
-                           columns=df_columns) 
+        #print(prob_dict)
+        for p in probs:
+            new_res.append(res_list[i].copy())
+            new_res[-1][3] = p
+        run_df = pd.DataFrame(new_res, columns=temp_df.columns)
+        temp_df = pd.concat([temp_df, run_df], ignore_index=True)
+
     
     res_df = pd.DataFrame(columns=df_columns)
     group_by_fields = ['area', 'size', 'lambda', 'max_link_len']
     grouped = temp_df.groupby(group_by_fields)
-    print(temp_df)
+    print(temp_df.to_string())
     for (condition, group) in grouped:
-        # condition is the list of values that created the group
-        mean = group['avg'].tolist()
-        var = group['CI'].tolist() # note there is a bad hack here. the CI
-                                   # column is used to store the variance in the
-                                   # temporary datafame, then we reset it to CI
-        combined_mean, h = compute_combined_estimate(mean, var)
         new_row_dict = dict(zip(group_by_fields, condition))
-        new_row_dict['avg'] = combined_mean
-        new_row_dict['CI'] = h     # here we reset it
+        m, ci = mean_confidence_interval(group['avg'])
+        new_row_dict['avg'] = m
+        new_row_dict['CI'] = ci
         new_row_dict['graphs'] = len(group)
         new_row_dict['avg_SKR'] = np.mean(group['avg_SKR'])        
     
         res_df = pd.concat([res_df, pd.DataFrame([new_row_dict])])
-        #[area, size, lbd, m, h, len(glist), g.graph['max_link_len']]    
     return res_df
     
 if __name__ == '__main__':
@@ -316,7 +320,9 @@ if __name__ == '__main__':
     parser.add_argument('--relax_thr', help=' inverse of the threshold used'
                         ' for the equation relaxation', default=10**6, 
                         type=int)
-
+    parser.add_argument('--weather', choices=weather_profile.keys(), 
+                        default='AVG')
+    
     args = parser.parse_args()
     
     df_columns = ['area', 'size', 'lambda', 'avg', 'CI', 
@@ -349,6 +355,7 @@ if __name__ == '__main__':
                                             r['key_size'], 
                                             r['rekey_interval (GB)'], 
                                             args.gen_rate), axis=1)
+        d['weather'] = args.weather
         res_d = pd.concat([res_d, d], ignore_index=True)
             
         if args.save_to:

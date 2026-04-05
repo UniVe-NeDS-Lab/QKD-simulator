@@ -11,6 +11,88 @@ from scipy.optimize import root_scalar
 # QKD SYSTEM DEFINITION (Strict Paper Parameters)
 # =====================================================================
 
+# V    # visibility (km) https://ieeexplore.ieee.org/stamp/stamp.jsp?arnumber=7124736
+# rain (mm/hour)
+# refraction parameter  (https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=6844864)
+
+# weather conditions parameters
+
+weather_profiles_small = {
+    'GOOD': {
+        'V': 20.0,    # clear visibility
+        'rain': 0.0,  # no rain
+        'Cn2': 1e-17  # zero turbulence
+    },
+    'AVG': {
+        'V': 10.0,    # light haze
+        'rain': 10.0, # light rain
+        'Cn2': 1e-15  # some turbulence
+    },
+    'BAD': {
+        'V': 4.0,     # heavy haze
+        'rain': 20.0, # heavy rain
+        'Cn2': 1e-14  # turbulence
+    },
+    'EXTREME': {      
+        'V': 0.6,     # thick fog
+        'rain': 50.0, # extreme rain
+        'Cn2': 1e-13  # heavy turbulence
+    }
+}
+
+weather_profile = {
+    'L0_OPTIMAL': {
+        'V': 50.0,    # Exceptionally clear sky
+        'rain': 0.0,  # No precipitation
+        'Cn2': 1e-17  # Practically zero turbulence
+    },
+    'L1_EXCELLENT': {
+        'V': 30.0,    # Very clear sky
+        'rain': 0.0,  # No precipitation
+        'Cn2': 1e-17  # Practically zero turbulence
+    },
+    'L2_VERY_GOOD': {
+        'V': 20.0,    # Very clear
+        'rain': 0.0,  # No precipitation
+        'Cn2': 5e-17  # Very weak turbulence
+    },
+    'L3_GOOD': {
+        'V': 10.0,    # Clear
+        'rain': 0.0,  # No precipitation
+        'Cn2': 1e-16  # Weak turbulence
+    },
+    'L4_FAIR': {
+        'V': 8.0,     # Light haze
+        'rain': 2.0,  # Light drizzle
+        'Cn2': 5e-16  # Weak-to-moderate turbulence
+    },
+    'L5_MODERATE': {
+        'V': 5.0,     # Haze
+        'rain': 5.0,  # Moderate rain
+        'Cn2': 1e-15  # Moderate turbulence
+    },
+    'L6_POOR': {
+        'V': 3.0,     # Heavy haze
+        'rain': 10.0, # Steady rain
+        'Cn2': 5e-15  # Moderate-to-strong turbulence
+    },
+    'L7_BAD': {
+        'V': 1.5,     # Thin fog
+        'rain': 20.0, # Heavy rain
+        'Cn2': 1e-14  # Strong turbulence
+    },
+    'L8_SEVERE': {
+        'V': 0.8,     # Light fog
+        'rain': 30.0, # Violent rain showers
+        'Cn2': 5e-14  # Very strong turbulence
+    },
+    'L9_EXTREME': {
+        'V': 0.4,     # Moderate fog
+        'rain': 50.0, # Severe storm
+        'Cn2': 1e-13  # Heavy turbulence
+    }
+}
+
 class NtanosFSO_QKD:
     def __init__(self):
         # Explicitly stated
@@ -129,6 +211,7 @@ def get_turbulence_margin(L_m, Cn2, p_outage=0.01, wavelength=1550e-9, a_r=0.18)
 # =====================================================================
 
 def get_skr(L, A_add=None, V=50.0, rain=0.0, Cn2=1e-17, p_outage=0.01):
+    """ L is meters """
     model = NtanosFSO_QKD()
     
     if A_add is not None:
@@ -188,9 +271,9 @@ def plot_skr_vs_distance():
     skr_bad = []
     
     for L in L_sweep:
-        skr_best.append(get_skr(L, V=50.0, rain=0.0, Cn2=1e-17))
-        skr_mod.append(get_skr(L, V=5.0,  rain=10.0, Cn2=1e-15))
-        skr_bad.append(get_skr(L, V=2,  rain=20.0, Cn2=1e-14))
+        skr_best.append(get_skr(L, **weather_profiles['GOOD']))
+        skr_mod.append(get_skr(L, **weather_profiles['AVG']))
+        skr_bad.append(get_skr(L, **weather_profiles['BAD']))
     
     # Plotting
     plt.figure(figsize=(9, 6))
