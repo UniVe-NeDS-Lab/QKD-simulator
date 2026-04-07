@@ -15,7 +15,7 @@ from collections import defaultdict
 import pandas as pd
 from tqdm.contrib import itertools as tqiter
 import os
-from qber_2021 import weather_profile
+from qber_2021 import weather_profiles
 
 import matplotlib.pyplot as plt
 from matplotlib import rc
@@ -28,6 +28,8 @@ import time
 import cProfile
 
 nodes = 10
+min_SKR = 10**(-9)
+
 
 def sedge(s,d=None):
     """ just return a sorted tuple to be used as a dictionary index.
@@ -59,17 +61,33 @@ def relabel_graph(g):
     for node in g.nodes():
         relabels[node] = len(relabels)
     return nx.relabel_nodes(g, relabels)
+
+def filter_edges(g, weather_profile, threshold=min_SKR):
+    # we assume GHz generation of photons, so 
+    # if SKR is < 1/s the link is unusable
+    # not used, as we use weighted Dijstra 
     
-def psi(s, d, rhos, lambdas, g):
+    profile = f'SKR-{weather_profile}'
+    def filter_edge(frm, to): # remove edges with performance lower than thr
+        return g[frm][to][profile] > threshold
+    g = nx.subgraph_view(g, filter_edge=filter_edge)
+    return g
+
+def psi(s, d, rhos, lambdas, g, skr_string):
     """ returns the key demand of link (s,d), given a previous iteration on
     rho, and the graph g from which we obtain gammas """
+    
+    def link_weight(s,d,attrs):
+        return 1/attrs[skr_string]
+    
     t = 0.0 
+    
     for start in g.nodes():
         paths = nx.single_source_shortest_path(g, start)
-        for stop in g.nodes():
+        #paths = nx.shortest_path(g, source=start, weight=link_weight)
+        for stop, path in paths.items():
             if start == stop:
                 continue
-            path = paths[stop] #nx.shortest_path(g, start, stop)
             edges = [(path[i],path[i+1]) for i in range(len(path)-1)]
             if (s,d) not in edges and (d,s) not in edges:
                 continue
@@ -103,11 +121,15 @@ def compute_rhos(g, lambdas, verbose=False, directed=False):
         oldrhos = rhos.copy()
         for s,d in g.edges():
             # see the comment on sorted edges in psi()
-                rhos[sedge(s,d)]  = alpha * min(1.0, g.edges[s,d][skr_string]/psi(s, d, oldrhos, lambdas, g)) + (1-alpha)*oldrhos[sedge(s,d)]
+                rhos[sedge(s,d)]  = alpha * min(1.0, g.edges[s,d][skr_string]/psi(s, d, oldrhos, lambdas, g, skr_string)) + (1-alpha)*oldrhos[sedge(s,d)]
     if verbose:
         print()
     r = []
-    all_paths = dict(nx.all_pairs_shortest_path(g))
+    
+    def link_weight(s,d,attrs):
+        return 1/attrs[skr_string]
+        
+    all_paths = dict(nx.all_pairs_all_shortest_paths(g, weight=link_weight))
     couple_set = set()
     prob_dict = defaultdict(list)
     for source in all_paths:
@@ -118,7 +140,13 @@ def compute_rhos(g, lambdas, verbose=False, directed=False):
             if not directed and tup in couple_set:
                 continue
             couple_set.add(tup)
-            path = all_paths[source][dest]
+            # FIXME this may simply throw an exception and fail
+            path = all_paths[source][dest][0]
+            if not path:
+                # if there is no path, prob is zero
+                prob_dict[0].append(0) 
+                continue
+                
             lpath = len(path)
             edges = [(path[i],path[i+1]) for i in range(lpath-1)]
             prob = 1
@@ -245,9 +273,12 @@ def parse_all_graphs(files, lbd):
                     l = set_lambda(g, lbd)
                     f_args.append((g,l))
                     mean_SKR = np.mean([e[2][skr_weather] for e in g.edges(data=True)])
+                    degree = np.mean([x for (_,x) in g.degree()])
                     res_list.append([area, size, lbd, 0, 0,  
                                     len(glist), mean_SKR, 
-                                    g.graph['max_link_len']])
+                                    g.graph['max_link_len'], 
+                                    nx.number_connected_components(g),
+                                    degree])
                     if args.processes == 1:
                         res.append(compute_rhos(g,l))
                         pbar.update(len(g))
@@ -258,7 +289,8 @@ def parse_all_graphs(files, lbd):
             with tqdm.tqdm(total=tot_nodes, desc="Processed graphs", 
                            unit="graphs") as pbar:
                 while not res.ready():
-                    remaining = res._number_left # hack
+                    #this does not work. 
+                    remaining = res._number_left * res._chunksize
                     pbar.n = len(f_args) - remaining
                     pbar.refresh()
                     area = res_list[pbar.n][0]
@@ -285,14 +317,17 @@ def parse_all_graphs(files, lbd):
     res_df = pd.DataFrame(columns=df_columns)
     group_by_fields = ['area', 'size', 'lambda', 'max_link_len']
     grouped = temp_df.groupby(group_by_fields)
-    print(temp_df.to_string())
+    #print(temp_df.to_string())
     for (condition, group) in grouped:
         new_row_dict = dict(zip(group_by_fields, condition))
         m, ci = mean_confidence_interval(group['avg'])
         new_row_dict['avg'] = m
         new_row_dict['CI'] = ci
-        new_row_dict['graphs'] = len(group)
-        new_row_dict['avg_SKR'] = np.mean(group['avg_SKR'])        
+        new_row_dict['graphs'] = len(glist)
+        new_row_dict['avg_SKR'] = np.mean(group['avg_SKR'])
+        new_row_dict['components'] = np.mean(group['components'])        
+        new_row_dict['degree'] = np.mean(group['degree'])
+        
     
         res_df = pd.concat([res_df, pd.DataFrame([new_row_dict])])
     return res_df
@@ -301,6 +336,9 @@ if __name__ == '__main__':
     """ graph g is expected to have a link attribute 'SKR' that contains 
     the secrete key rate. While lambda[(n,m)] is the traffic intensity 
     from node n do m. Units are arbitrary, they must be consistent """
+    
+    profiles = [x for x in weather_profiles.keys()]
+    def_profile = profiles[len(profiles)//2]
     
     parser = argparse.ArgumentParser()
     parser.add_argument('--files', help='a list of .graphml files to parse', 
@@ -320,13 +358,14 @@ if __name__ == '__main__':
     parser.add_argument('--relax_thr', help=' inverse of the threshold used'
                         ' for the equation relaxation', default=10**6, 
                         type=int)
-    parser.add_argument('--weather', choices=weather_profile.keys(), 
-                        default='AVG')
+    parser.add_argument('--weather', choices=profiles, 
+                        default=def_profile)
     
     args = parser.parse_args()
     
     df_columns = ['area', 'size', 'lambda', 'avg', 'CI', 
-                  'graphs', 'avg_SKR', 'max_link_len']
+                  'graphs', 'avg_SKR', 'max_link_len', 'components', 
+                  'degree']
     res_d = pd.DataFrame()
     
     if args.save_to:

@@ -203,6 +203,9 @@ def fit(values, fname, target='length', comments=''):
     
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
+    profiles = [x for x in weather_profiles.keys()]
+    def_profile = profiles[len(profiles)//2]
+    
     parser.add_argument('--runs', type=int, default=10000)
     parser.add_argument('--processes', help='number of parallel processes', type=int, default=1)
     parser.add_argument('--gen_only', action='store_true', default=False)
@@ -215,8 +218,7 @@ if __name__ == '__main__':
     parser.add_argument('--max_len', type=int, help='Maximum link length (m)', 
                         default = 0)
     parser.add_argument('--results_folder', default='./results/')
-    parser.add_argument('--weather', choices=['BAD', 'AVG', 'GOOD', 'EXTREME'], 
-                        default='AVG')
+    parser.add_argument('--weather', choices=profiles, default=def_profile)
  
     args = parser.parse_args()
     

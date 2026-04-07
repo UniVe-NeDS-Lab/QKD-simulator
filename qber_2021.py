@@ -40,7 +40,7 @@ weather_profiles_small = {
     }
 }
 
-weather_profile = {
+weather_profiles = {
     'L0_OPTIMAL': {
         'V': 50.0,    # Exceptionally clear sky
         'rain': 0.0,  # No precipitation
