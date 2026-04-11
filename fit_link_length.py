@@ -12,8 +12,10 @@ import os
 import glob
 from qber import FSOQKD
 from qber_2021 import get_skr, get_max_distance, weather_profiles
+from shapely.geometry import Point, MultiPoint
 import random
 import math
+import html
 
 rural_list = ['visibility_graphs/rural1/', 'visibility_graphs/rural2/', 
                'visibility_graphs/rural3/']
@@ -29,11 +31,19 @@ def distance(p1, p2):
     x2,y2 = p2
     return ((x1-x2)**2 + (y1-y2)**2)**0.5
 
+def compute_area(plist):
+    # Create Shapely Point objects
+    points = [Point(xy) for xy in plist]
+    
+    # Wrap the points in a closed plane figure (Convex Hull)
+    polygon = MultiPoint(points).convex_hull
+    return polygon.area
+
 def filter_edges(adj_list_file, max_len, coord_dict, sample_size):
     """ return a list of graphs that are connected components that 
     satisfy a maximum link lenght and a minimum number of nodes """
     g = nx.read_adjlist(adj_list_file, delimiter=',')
-
+    
     
     def filter_edge(frm, to):
         return distance(coord_dict[int(frm)], 
@@ -78,6 +88,7 @@ def MDRW(components, sample_size, coord_dict, ngraphs=1,
                         size=core_nodes))
         else:
             core = list(np.random.choice(g.nodes(), size=core_nodes))
+        
         iterations = 1000
         # if we are unlucky in the initial choice of core nodes, we may get 
         # stuck in a disconnected partition and loop forever. 
@@ -140,8 +151,9 @@ def gen_graphs(folder, folder_number, runs=5000, size=30, fname=''):
     components = filter_edges(adj_file, args.max_len, coord_dict, size)
 
     for g in MDRW(components, size, coord_dict, runs):
-        g.graph.update({'scenario':folder, 'max_link_len':args.max_len, 
+        g.graph.update({'scenario':fname, 'max_link_len':args.max_len, 
                         'weather':args.weather, **weather_profiles[args.weather]})
+        g.graph['area'] = compute_area([coord_dict[int(n)] for n in g])
         for frm, to, data in g.edges(data=True):
             data['length'] =  distance(coord_dict[int(frm)], 
                                       coord_dict[int(to)])

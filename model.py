@@ -15,7 +15,7 @@ from collections import defaultdict
 import pandas as pd
 from tqdm.contrib import itertools as tqiter
 import os
-from qber_2021 import weather_profiles
+from qber_2021 import weather_profiles, weather_mapping
 
 import matplotlib.pyplot as plt
 from matplotlib import rc
@@ -29,7 +29,8 @@ import cProfile
 
 nodes = 10
 min_SKR = 10**(-9)
-
+graph_stats_columns=['size', 'area', 'max_link_len', 
+                                    'path_len_m', 'path_len_metric']
 
 def sedge(s,d=None):
     """ just return a sorted tuple to be used as a dictionary index.
@@ -100,6 +101,31 @@ def psi(s, d, rhos, lambdas, g, skr_string):
             t = t + lambdas[(start,stop)]*fact 
     return t
 
+def path_length_statistics(g):
+    
+    link_weight = 'SKR-' + weather_mapping[g.graph['max_link_len']]
+    
+    all_paths = dict(nx.all_pairs_all_shortest_paths(g, weight=link_weight))
+
+    path_length_m = []
+    visited = set()
+    for (s, plist) in all_paths.items():
+        visited.add(s)
+        for d in plist:
+            if s == d or d in visited:
+                continue
+            len_m = 0
+            path = plist[d][0]
+            for i in range(len(path)-1):
+                edge = path[i]
+                len_m += g.edges[path[i], path[i+1]]['length']
+            ll = [len(g), g.graph['scenario'], g.graph['max_link_len'],
+                                    len_m, len(path)-1]
+            path_length_m.append(ll)
+
+    return path_length_m
+
+    
 def compute_rhos(g, lambdas, verbose=False, directed=False):
     rhos = dict.fromkeys([sedge(e) for e in g.edges()], 0.1)
     oldrhos = dict.fromkeys(rhos.keys(), 0)
@@ -110,6 +136,15 @@ def compute_rhos(g, lambdas, verbose=False, directed=False):
     skr_string = f'SKR-{args.weather}'
     # this is approximating rho, eq. 2
     last_alpha = 1
+    
+    def link_weight(s,d,attrs):
+        return 1/attrs[skr_string]
+        
+    if args.stats: 
+        # we can disable the prob, computing if we need only the graph stats
+        plen_stats = path_length_statistics(g)
+        return [], {}, plen_stats
+    
     if verbose:
         print('Starting graph analysis. Alpha progress: ', end='', flush=True)
     while (LA.norm([oldrhos[k]-rhos[k] for k in rhos],2)>1/args.relax_thr):
@@ -124,12 +159,10 @@ def compute_rhos(g, lambdas, verbose=False, directed=False):
                 rhos[sedge(s,d)]  = alpha * min(1.0, g.edges[s,d][skr_string]/psi(s, d, oldrhos, lambdas, g, skr_string)) + (1-alpha)*oldrhos[sedge(s,d)]
     if verbose:
         print()
-    r = []
     
-    def link_weight(s,d,attrs):
-        return 1/attrs[skr_string]
-        
+
     all_paths = dict(nx.all_pairs_all_shortest_paths(g, weight=link_weight))
+
     couple_set = set()
     prob_dict = defaultdict(list)
     for source in all_paths:
@@ -157,7 +190,7 @@ def compute_rhos(g, lambdas, verbose=False, directed=False):
     # Save stats with the Process ID (PID) in the filename
     stats_file = f"profile_pid_{os.getpid()}.stats"
     #profiler.dump_stats(stats_file)
-    return rhos, prob_dict
+    return rhos, prob_dict, plen_stats
 
 def plot_graphs(g, rhos, prob_dict):
 
@@ -300,8 +333,9 @@ def parse_all_graphs(files, lbd):
             res = res.get()
     temp_df = pd.DataFrame(columns=df_columns) 
     
+    path_len_list = []
     for i in range(len(res_list)):
-        _, prob_dict = res[i]
+        _, prob_dict, plen = res[i]
         line = res_list[i]
         new_res = []
         
@@ -312,7 +346,10 @@ def parse_all_graphs(files, lbd):
             new_res[-1][3] = p
         run_df = pd.DataFrame(new_res, columns=temp_df.columns)
         temp_df = pd.concat([temp_df, run_df], ignore_index=True)
-
+        path_len_list.extend(plen)
+    graph_stats = pd.DataFrame(columns=graph_stats_columns)
+    graph_stats = pd.concat([graph_stats, pd.DataFrame(path_len_list,
+                                            columns=graph_stats_columns)])
     
     res_df = pd.DataFrame(columns=df_columns)
     group_by_fields = ['area', 'size', 'lambda', 'max_link_len']
@@ -330,7 +367,10 @@ def parse_all_graphs(files, lbd):
         
     
         res_df = pd.concat([res_df, pd.DataFrame([new_row_dict])])
-    return res_df
+    return res_df, graph_stats
+
+
+
     
 if __name__ == '__main__':
     """ graph g is expected to have a link attribute 'SKR' that contains 
@@ -360,6 +400,7 @@ if __name__ == '__main__':
                         type=int)
     parser.add_argument('--weather', choices=profiles, 
                         default=def_profile)
+    parser.add_argument('--stats', default='')
     
     args = parser.parse_args()
     
@@ -383,7 +424,7 @@ if __name__ == '__main__':
         lbd = lbd/(args.gen_rate)   # the SKR in the graphs is 
                                     # b/s/pulse, so we normalize
                                     # by the gen_rate 
-        d = parse_all_graphs(args.files, lbd)
+        d, graph_stats = parse_all_graphs(args.files, lbd)
         d['gen_rate (Gb/s)'] = args.gen_rate/1_000_000_000
         d['traffic_demand (Mb/s)'] = dem
         d['rekey_interval (GB)'] = args.rekey_interval
@@ -405,5 +446,7 @@ if __name__ == '__main__':
                       index=False, 
                       header=write_header,  # Only True for the first write
                       encoding='utf-8')
-    print(d)
+    if args.stats:
+        graph_stats.to_csv(args.stats)
+    #   plot boxplot of length Vs size, Vs area Vs weather_cond .
            

@@ -93,6 +93,21 @@ weather_profiles = {
     }
 }
 
+weather_mapping = {
+    3500: 'L0_OPTIMAL',
+    3400: 'L1_EXCELLENT',
+    3300: 'L2_VERY_GOOD',
+    3100: 'L3_GOOD',
+    2000: 'L4_FAIR',
+    1500: 'L5_MODERATE',
+    1100: 'L6_POOR',
+    700: 'L7_BAD',
+    400: 'L8_SEVERE',
+    200: 'L9_EXTREME'
+}
+
+
+
 class NtanosFSO_QKD:
     def __init__(self):
         # Explicitly stated
