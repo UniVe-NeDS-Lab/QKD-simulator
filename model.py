@@ -139,10 +139,11 @@ def compute_rhos(g, lambdas, verbose=False, directed=False):
     
     def link_weight(s,d,attrs):
         return 1/attrs[skr_string]
-        
+
+    plen_stats = []     
     if args.stats: 
-        # we can disable the prob, computing if we need only the graph stats
         plen_stats = path_length_statistics(g)
+    if not args.relax_thr:
         return [], {}, plen_stats
     
     if verbose:
