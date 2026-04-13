@@ -30,7 +30,9 @@ import cProfile
 nodes = 10
 min_SKR = 10**(-9)
 graph_stats_columns=['size', 'area', 'max_link_len', 
-                                    'path_len_m', 'path_len_metric']
+                                    'path_len_m', 'path_len_metric',
+                                    'area_covered', 'degree', 
+                                    'effective_degree']
 
 def sedge(s,d=None):
     """ just return a sorted tuple to be used as a dictionary index.
@@ -117,10 +119,12 @@ def path_length_statistics(g):
             len_m = 0
             path = plist[d][0]
             for i in range(len(path)-1):
-                edge = path[i]
                 len_m += g.edges[path[i], path[i+1]]['length']
             ll = [len(g), g.graph['scenario'], g.graph['max_link_len'],
-                                    len_m, len(path)-1]
+                                    len_m, len(path)-1, 
+                                    g.graph['area'],
+                                    np.mean([x for (_,x) in g.degree()]), # degree
+                                    0] # the effective degree is added later
             path_length_m.append(ll)
 
     return path_length_m
@@ -166,6 +170,7 @@ def compute_rhos(g, lambdas, verbose=False, directed=False):
 
     couple_set = set()
     prob_dict = defaultdict(list)
+    used_edges = set()
     for source in all_paths:
         for dest in all_paths[source]:
             tup = (min(source, dest), max(source, dest))
@@ -186,11 +191,10 @@ def compute_rhos(g, lambdas, verbose=False, directed=False):
             prob = 1
             for edge in edges:
                 prob = prob*rhos[sedge(edge)]
+                used_edges.add(sedge(edge))
             prob_dict[lpath].append(prob) 
-    #profiler.disable()
-    # Save stats with the Process ID (PID) in the filename
-    stats_file = f"profile_pid_{os.getpid()}.stats"
-    #profiler.dump_stats(stats_file)
+    for path in plen_stats:
+        path[7] = len(used_edges)/len(g)*2 # effective degree
     return rhos, prob_dict, plen_stats
 
 def plot_graphs(g, rhos, prob_dict):
@@ -339,7 +343,6 @@ def parse_all_graphs(files, lbd):
         _, prob_dict, plen = res[i]
         line = res_list[i]
         new_res = []
-        
         probs = [p for plist in prob_dict.values() for p in plist]
         #print(prob_dict)
         for p in probs:
@@ -349,9 +352,9 @@ def parse_all_graphs(files, lbd):
         temp_df = pd.concat([temp_df, run_df], ignore_index=True)
         path_len_list.extend(plen)
     graph_stats = pd.DataFrame(columns=graph_stats_columns)
+    print(graph_stats_columns, path_len_list[0])
     graph_stats = pd.concat([graph_stats, pd.DataFrame(path_len_list,
                                             columns=graph_stats_columns)])
-    
     res_df = pd.DataFrame(columns=df_columns)
     group_by_fields = ['area', 'size', 'lambda', 'max_link_len']
     grouped = temp_df.groupby(group_by_fields)
@@ -447,7 +450,7 @@ if __name__ == '__main__':
                       index=False, 
                       header=write_header,  # Only True for the first write
                       encoding='utf-8')
-    if args.stats:
-        graph_stats.to_csv(args.stats)
-    #   plot boxplot of length Vs size, Vs area Vs weather_cond .
+
+        if args.stats:
+            graph_stats.to_csv(args.stats)
            
