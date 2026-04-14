@@ -93,75 +93,115 @@ weather_profiles = {
     }
 }
 
-weather_mapping = {
-    3500: 'L0_OPTIMAL',
-    3400: 'L1_EXCELLENT',
-    3300: 'L2_VERY_GOOD',
-    3100: 'L3_GOOD',
-    2000: 'L4_FAIR',
-    1500: 'L5_MODERATE',
-    1100: 'L6_POOR',
-    700: 'L7_BAD',
-    400: 'L8_SEVERE',
-    200: 'L9_EXTREME'
-}
-
 
 
 class NtanosFSO_QKD:
     def __init__(self):
-        # Explicitly stated
+        # Explicitly stated # table 1
         self.wavelength = 1550e-9        
         self.d_t = 0.05                  
         self.a_r = 0.18                  
         self.theta = 182e-6              
         self.alpha_clear = 0.192         
         
-        self.mu = 0.439                  
+        self.mu = 0.439     # mean photon number this is adjusted in order
+                            # not to have too many photons, and it is increased
+                            # to 0.65 in Stathis26 (defined in text)
+                            # it should be optimized as in Ma III.a based
+                            # on function f() [that is NOT the generation 
+                            # frequency], implementing (12)
+                            # From Ma et al we understand it should be as close
+                            # to 1 as possible, as only single fotons transmit 
+                            # valid information
         self.nu = 0.11                   
-        self.f_ec = 1.2                  
-        self.e_opt = 0.01                
+        self.f_ec = 1.22     # table 1 from ntanos
+        self.e_det = 0.01   # detector error Table 1 from Ma et al. 
+                            # (1-Visibility)/2 in Ntanos26, but visibility is not
+                            # given. 
         self.rho_ap = 0.008              
-        self.e0 = 0.5                    
+        self.e0 = 0.5       # error rate background. Same in btoh papers
         
         # Guessed / Assumed baseline hardware losses
-        self.L_sys = 17.65 
-        self.q = 0.5                     
+        # table 1
+        self.L_sys = 17.65 # 2.65 + 3.0 + 1.5 + 0.5 + 10.0 (10% efficiency) 
+        self.q = 0.5       # 0.5 in Ntano21, 0.9 in Stathis26 
+        
+        # Y0 is the rate of dark counts, photons that were detected during the
+        # vacuum state, i.e. no signal at all. Ntanos21 mention that this 
+        # should be 50k per sec. As all the other quantities are per pulse, 
+        # we need to report it to pulses. This is the only quantity that 
+        # depends on the assumed rate and should be changed if rate
+        # is changed
         self.t_gate = 1e-9
-        self.Y0 = 51000 * self.t_gate 
+        self.Y0 = 50000 * self.t_gate 
 
     def H2(self, x):
         x = np.clip(x, 1e-15, 1 - 1e-15)
         return -x * np.log2(x) - (1 - x) * np.log2(1 - x)
 
     def get_A_geo(self, L):
+        # eq. 2
         d_s = self.d_t + 2 * L * np.tan(self.theta / 2)
         return np.where(self.a_r > d_s, 0.0, 20 * np.log10(d_s / self.a_r))
 
+    def get_A_clear(self, L):
+        # eq. 3 in Ntanos21, is not really clear. It reports a A_clear in 
+        # dB, but it uses an 'a' coefficient that refers dB/km. In Stathis26 it 
+        # is more clearly said that the atmospheric absorption is alpha*km
+        return self.alpha_clear * L/1000
+                       
     def calculate_skr(self, L, A_add):
-        total_loss_dB = self.get_A_geo(L) + (self.alpha_clear * (L/1000.0)) + self.L_sys + A_add
+        # eq. 3 can be written as
+        total_loss_dB = self.get_A_geo(L) + self.get_A_clear(L) + self.L_sys + A_add
         eta = 10 ** (-total_loss_dB / 10)
         
-        Q_mu_raw = self.Y0 + 1 - np.exp(-eta * self.mu)
-        Q_mu = Q_mu_raw * (1 + self.rho_ap)
-        E_mu = (self.e0 * self.Y0 + self.e_opt * (1 - np.exp(-eta * self.mu)) + 0.5 * self.rho_ap * Q_mu_raw) / Q_mu
+        # So the Ntanos21 paper
+        # uses a theoretical model from Ma2025: https://journals.aps.org/pra/pdf/10.1103/PhysRevA.72.012326
+        # the paper starts from the transmittance obtained with the previous
+        # path loss calculation, and implements a lower bound for SRK when
+        # a three-state decoy protocol is applied. 
         
+        # eq 10
+        Q_mu_raw = self.Y0 + 1 - np.exp(-eta * self.mu)
+        Q_mu = Q_mu_raw * (1 + self.rho_ap) # in Nntanos21 the After-pulse 
+                                            # probability factor rho_ap is mentioned
+                                            # it is not presente in Stathis, 
+                                            # simply because Q_mu is measured and
+                                            # not estimated. However it does not 
+                                            # say how it changes the equations.
+                                            # What I'v found is eq. 7 in Papapanos20
+                                            # https://arxiv.org/pdf/2010.03358
+           
+        # this formulation is cosmetically different from eq 8 in Papapanos
+        # but it is numerically the same (here Y0 = Pdc in the paper, but
+        # rescaling all to Y0 as in the paper, it is OK).
+        E_mu = (self.e0 * self.Y0 + self.e_det * (1 - np.exp(-eta * self.mu)) + self.e0 * self.rho_ap * Q_mu_raw) / Q_mu
+        
+        
+        # this is needed to compute the BER at the decoy state, E_nu. It is 
+        # functionally equivalent to E_mu but it uses another intensity (nu != mu)
+        # as by definition of decoy state
         Q_nu_raw = self.Y0 + 1 - np.exp(-eta * self.nu)
         Q_nu = Q_nu_raw * (1 + self.rho_ap)
-        E_nu = (self.e0 * self.Y0 + self.e_opt * (1 - np.exp(-eta * self.nu)) + 0.5 * self.rho_ap * Q_nu_raw) / Q_nu
+        E_nu = (self.e0 * self.Y0 + self.e_det * (1 - np.exp(-eta * self.nu)) + self.e0 * self.rho_ap * Q_nu_raw) / Q_nu
         
+        ## the next four lines provide the bount on Y1 as in eq 34 Ma et al
         term1 = Q_nu * np.exp(self.nu)
         term2 = Q_mu * np.exp(self.mu) * (self.nu**2 / self.mu**2)
         term3 = (self.mu**2 - self.nu**2) / self.mu**2 * self.Y0
+        Y1 = (self.mu / (self.mu * self.nu - self.nu**2)) * (term1 - term2 - term3)
+        #Y1 = np.maximum(Y1, 1e-15)
+        ##
         
-        Y1_L = (self.mu / (self.mu * self.nu - self.nu**2)) * (term1 - term2 - term3)
-        Y1_L = np.maximum(Y1_L, 1e-15) 
-        Q1_L = Y1_L * self.mu * np.exp(-self.mu)
+        # eq. 8 Ma et al, for i=1. Becomes eq. 35 by pluggin eq. 34 in.
+        Q1 = Y1 * self.mu * np.exp(-self.mu)
         
-        e1_U = (E_nu * Q_nu * np.exp(self.nu) - self.e0 * self.Y0) / (self.nu * Y1_L)
-        e1_U = np.clip(e1_U, 1e-15, 0.5)
+        # eq 37 in Ma et al.
+        e1 = (E_nu * Q_nu * np.exp(self.nu) - self.e0 * self.Y0) / (self.nu * Y1)
+        e1 = np.clip(e1, 1e-15, 0.5) 
         
-        R = self.q * (Q1_L * (1 - self.H2(e1_U)) - Q_mu * self.f_ec * self.H2(E_mu))
+        # Ntano21 eq 1 or Stathis26 eq. 21 
+        R = self.q * (Q1 * (1 - self.H2(e1)) - Q_mu * self.f_ec * self.H2(E_mu))
         return np.maximum(R, 1e-15)
 
 # =====================================================================
@@ -169,6 +209,7 @@ class NtanosFSO_QKD:
 # =====================================================================
 
 def get_scattering_loss(visibility_km, lambda_nm=1550):
+    # the Kim model (TBC)
     if visibility_km > 50:
         q = 1.6
     elif visibility_km > 6:
@@ -191,10 +232,15 @@ def get_turbulence_margin(L_m, Cn2, p_outage=0.01, wavelength=1550e-9, a_r=0.18)
     if Cn2 <= 1e-17 or L_m < 10:
         return 0.0
         
+    # scintillation Ntanos 2026 eq 10
     k_wave = 2 * np.pi / wavelength
+    # Rytov Variance defined in text after e1. 6
     sigma_r2 = 1.23 * Cn2 * (k_wave**(7/6)) * (L_m**(11/6))
+    
+    # defined in text below eq. 6
     d = np.sqrt((k_wave * a_r**2) / (4 * L_m))
     
+    # eq. 5 and 6 
     term_a = 0.49 * sigma_r2 / (1 + 0.18 * d**2 + 0.56 * sigma_r2**(12/5))**(7/6)
     a = (np.exp(term_a) - 1)**-1
     term_b = 0.51 * sigma_r2 * (1 + 0.69 * sigma_r2**(12/5))**(-5/6) / (1 + 0.9 * d**2 + 0.62 * sigma_r2**(12/5))**(5/6)
@@ -205,6 +251,7 @@ def get_turbulence_margin(L_m, Cn2, p_outage=0.01, wavelength=1550e-9, a_r=0.18)
     if a > 150 or b > 150:
         return 0.0
     
+    # def eq. 4
     def pdf(I):
         if I <= 0: return 0.0
         val = 2 * (a * b)**((a + b) / 2) / (gamma(a) * gamma(b)) * I**((a + b) / 2 - 1) * kv(a - b, 2 * np.sqrt(a * b * I))
@@ -214,7 +261,9 @@ def get_turbulence_margin(L_m, Cn2, p_outage=0.01, wavelength=1550e-9, a_r=0.18)
         import warnings
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            sol = root_scalar(lambda I_th: quad(pdf, 0, I_th, limit=200)[0] - p_outage, 
+            # implements the integral of eq 7 and then the inversion of 
+            # eq. 8, finally convert to dB
+            sol = root_scalar(lambda I_th: quad(pdf, -np.inf, I_th)[0] - p_outage, 
                               bracket=[1e-20, 10], method='brentq')
         return -10 * np.log10(sol.root)
     except:
@@ -286,9 +335,9 @@ def plot_skr_vs_distance():
     skr_bad = []
     
     for L in L_sweep:
-        skr_best.append(get_skr(L, **weather_profiles['GOOD']))
-        skr_mod.append(get_skr(L, **weather_profiles['AVG']))
-        skr_bad.append(get_skr(L, **weather_profiles['BAD']))
+        skr_best.append(get_skr(L, **weather_profiles['L0_OPTIMAL']))
+        skr_mod.append(get_skr(L, **weather_profiles['L4_FAIR']))
+        skr_bad.append(get_skr(L, **weather_profiles['L9_EXTREME']))
     
     # Plotting
     plt.figure(figsize=(9, 6))
@@ -308,8 +357,8 @@ def plot_skr_vs_distance():
     plt.show()
 
 if __name__ == "__main__":
-    print("Generating Figure 2 recreation...")
-    plot_figure_2()
+    #print("Generating Figure 2 recreation...")
+    #plot_figure_2()
     
     print("Generating SKR vs Distance plot...")
     plot_skr_vs_distance()
