@@ -131,7 +131,9 @@ class NtanosFSO_QKD:
         # should be 50k per sec. As all the other quantities are per pulse, 
         # we need to report it to pulses. This is the only quantity that 
         # depends on the assumed rate and should be changed if rate
-        # is changed
+        # is changed. 
+        # note that authors mention that this quantity includes the 
+        # solar radiance from eq. 11
         self.t_gate = 1e-9
         self.Y0 = 50000 * self.t_gate 
 
@@ -209,7 +211,7 @@ class NtanosFSO_QKD:
 # =====================================================================
 
 def get_scattering_loss(visibility_km, lambda_nm=1550):
-    # the Kim model (TBC)
+    # the Kim/Kruse model (TBC with reference)
     if visibility_km > 50:
         q = 1.6
     elif visibility_km > 6:
@@ -223,6 +225,7 @@ def get_scattering_loss(visibility_km, lambda_nm=1550):
     return (17.0 / visibility_km) * (lambda_nm / 550.0)**(-q)
 
 def get_rain_loss(rain_rate_mm_hr):
+    # eq. 10 Ntanos2021
     if rain_rate_mm_hr <= 0:
         return 0.0
     return 1.1394 * (rain_rate_mm_hr ** 0.7057)
