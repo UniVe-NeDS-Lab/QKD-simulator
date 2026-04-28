@@ -26,6 +26,66 @@ from pathlib import Path
 import multiprocessing
 import time
 import cProfile
+import unittest 
+from unittest.mock import patch, MagicMock
+
+args = None
+
+
+def mock_graph(gsize=4, SKR=1):
+    g = nx.path_graph(gsize)
+    for u, v in g.edges():
+        g[u][v]['SKR-OPTIMAL'] = SKR
+    lc = nx.edge_load_centrality(g)
+    (medge, mload) = sorted(lc.items(), key=lambda x: x[1])[-1]
+    # returns the graph, the most central edge and the number
+    # of paths passing through it. 
+    # in a line of N  nodes (N even) this corresponds to
+    # (N-2)**2/w + 2N -2 
+    return g, medge, mload
+
+class TestModel(unittest.TestCase):
+
+    args= MagicMock()
+    args.weather = "OPTIMAL"
+    args.stats = False
+    args.relax_thr = 1000000
+    args.key_size = 256
+    args.rekey_interval = 100
+    args.gen_rate = 1_000_000_000
+    
+
+    def test_line(self):
+        # build a line network, get the highest number of paths
+        # in a link m. Set the lambda to SKR/m, it must work.
+        g, e, load = mock_graph(3) 
+        l = set_lambda(g, lbd=1/load)
+        with patch('model.args', self.args):
+            rhos, prob_dict, len_stats = compute_rhos(g, l)
+       
+        for length in prob_dict:
+            for path in prob_dict[length]:
+                self.assertAlmostEqual(path, 1, places=3)
+
+    def test_line_load(self, cap=True):
+        with patch('model.args', self.args):
+            SKR=12.8/args.gen_rate
+            g, e, load = mock_graph(SKR=SKR)
+            lbd = compute_lambda(40000) # 40Gb/s, 12.8 bit/s per link
+            if cap:
+                lbd = lbd/load
+            l = set_lambda(g, lbd)
+            rhos, prob_dict, len_stats = compute_rhos(g, l)
+       
+        for length in prob_dict:
+            for path in prob_dict[length]:
+                if cap:
+                    self.assertAlmostEqual(path, 1, places=3)
+                else:
+                    self.assertNotAlmostEqual(path, 1, places=3)
+
+    def test_line_load_uncapped(self):
+        self.test_line_load(cap=False)
 
 nodes = 10
 min_SKR = 10**(-9)
@@ -155,13 +215,12 @@ def compute_rhos(g, lambdas, verbose=False, directed=False):
     while (LA.norm([oldrhos[k]-rhos[k] for k in rhos],2)>1/args.relax_thr):
         curr_alpha = LA.norm([oldrhos[k]-rhos[k] for k in rhos],2)
         if curr_alpha < last_alpha/10 and verbose:
-            last_alpha = curr_alpha
             print(f'{curr_alpha:.6f}', end=', ', flush=True)
 
         oldrhos = rhos.copy()
         for s,d in g.edges():
             # see the comment on sorted edges in psi()
-                rhos[sedge(s,d)]  = alpha * min(1.0, g.edges[s,d][skr_string]/psi(s, d, oldrhos, lambdas, g, skr_string)) + (1-alpha)*oldrhos[sedge(s,d)]
+            rhos[sedge(s,d)]  = alpha * min(1.0, g.edges[s,d][skr_string]/psi(s, d, oldrhos, lambdas, g, skr_string)) + (1-alpha)*oldrhos[sedge(s,d)]
     if verbose:
         print()
     
@@ -374,6 +433,17 @@ def parse_all_graphs(files, lbd):
     return res_df, graph_stats
 
 
+def compute_lambda(dem=100):
+    # every rekey_interval Bytes, we need a key of size key_size, so for 
+    # every QKD bit sent, we can carry key_size/rekey_interval*8 
+    # thus to sustain a certain traffic_demand we need a QKD load of:
+    lbd = dem*1_000_000*args.key_size/\
+    (args.rekey_interval*1_000_000_000*8) # lambda in bit/s
+          
+    lbd = lbd/(args.gen_rate)   # the SKR in the graphs is 
+                                # b/s/pulse, so we normalize
+                                # by the gen_rate 
+    return lbd
 
     
 if __name__ == '__main__':
@@ -419,15 +489,7 @@ if __name__ == '__main__':
             os.remove(args.save_to)
             print(f"Existing {args.save_to} removed. Starting fresh.")
     for dem in args.traffic_demand:
-        # every rekey_interval Bytes, we need a key of size key_size, so for 
-        # every QKD bit sent, we can carry key_size/rekey_interval*8 
-        # thus to sustain a certain traffic_demand we need a QKD load of:
-        lbd = dem*1_000_000*args.key_size/\
-          (args.rekey_interval*1_000_000_000*8) # lambda in bit/s
-           
-        lbd = lbd/(args.gen_rate)   # the SKR in the graphs is 
-                                    # b/s/pulse, so we normalize
-                                    # by the gen_rate 
+        lbd = compute_lambda(dem)
         d, graph_stats = parse_all_graphs(args.files, lbd)
         d['gen_rate (Gb/s)'] = args.gen_rate/1_000_000_000
         d['traffic_demand (Mb/s)'] = dem

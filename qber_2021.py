@@ -87,12 +87,24 @@ weather_profiles = {
         'Cn2': 5e-14  # Very strong turbulence
     },
     'L9_EXTREME': {
-        'V': 0.4,     # Moderate fog
+        'V': 0.4,     # Thick fog
         'rain': 50.0, # Severe storm
         'Cn2': 1e-13  # Heavy turbulence
     }
 }
 
+weather_mapping = {
+    3500: 'L0_OPTIMAL',
+    3400: 'L1_EXCELLENT',
+    3300: 'L2_VERY_GOOD',
+    3100: 'L3_GOOD',
+    2000: 'L4_FAIR',
+    1500: 'L5_MODERATE',
+    1100: 'L6_POOR',
+    700: 'L7_BAD',
+    400: 'L8_SEVERE',
+    200: 'L9_EXTREME'
+}
 
 
 class NtanosFSO_QKD:
@@ -113,18 +125,20 @@ class NtanosFSO_QKD:
                             # From Ma et al we understand it should be as close
                             # to 1 as possible, as only single fotons transmit 
                             # valid information
-        self.nu = 0.11                   
-        self.f_ec = 1.22     # table 1 from ntanos
+        self.nu = 0.11      # mean photon number for decoy states
+        self.f_ec = 1.22    # error correction, table 1 from Ntanos
         self.e_det = 0.01   # detector error Table 1 from Ma et al. 
                             # (1-Visibility)/2 in Ntanos26, but visibility is not
                             # given. 
-        self.rho_ap = 0.008              
-        self.e0 = 0.5       # error rate background. Same in btoh papers
+        self.rho_ap = 0.008 # afterpulse  probability factor (Ntanos)
+        self.e0 = 0.5       # error rate background. Same in both papers
         
-        # Guessed / Assumed baseline hardware losses
-        # table 1
+        # hardware losses
+        # Ntanos table 1
         self.L_sys = 17.65 # 2.65 + 3.0 + 1.5 + 0.5 + 10.0 (10% efficiency) 
-        self.q = 0.5       # 0.5 in Ntano21, 0.9 in Stathis26 
+        self.q = 0.5       # 0.5 in Ntanos21, 0.9 in Stathis26 actually, there are
+                           # "efficient BB84" versions that reduce randomicity of the 
+                           # base choice, and thus can receive more than 50% of the qbits
         
         # Y0 is the rate of dark counts, photons that were detected during the
         # vacuum state, i.e. no signal at all. Ntanos21 mention that this 
@@ -134,6 +148,7 @@ class NtanosFSO_QKD:
         # is changed. 
         # note that authors mention that this quantity includes the 
         # solar radiance from eq. 11
+        # Spathis et al use 6000, but they operate at night
         self.t_gate = 1e-9
         self.Y0 = 50000 * self.t_gate 
 
@@ -329,26 +344,20 @@ def plot_figure_2():
     plt.legend()
     plt.show()
 
+
+
 def plot_skr_vs_distance():
     """Sweeps L from 100m to 3000m for three different weather conditions."""
     L_sweep = np.linspace(100, 5000, 50) 
     
-    skr_best = []
-    skr_mod = []
-    skr_bad = []
-    
-    for L in L_sweep:
-        skr_best.append(get_skr(L, **weather_profiles['L0_OPTIMAL']))
-        skr_mod.append(get_skr(L, **weather_profiles['L4_FAIR']))
-        skr_bad.append(get_skr(L, **weather_profiles['L9_EXTREME']))
-    
-    # Plotting
     plt.figure(figsize=(9, 6))
     
-    plt.semilogy(L_sweep, skr_best, 'g-', linewidth=2, label="Best Case (Clear, Cn2=1e-17)")
-    plt.semilogy(L_sweep, skr_mod,  'b--', linewidth=2, label="Moderate (Haze, Cn2=1e-15)")
-    plt.semilogy(L_sweep, skr_bad,  'r-.', linewidth=2, label="Worst Case (Fog+Rain, Cn2=1e-14)")
-    
+    for profile in weather_profiles: #['L0_OPTIMAL','L2_VERY_GOOD', 'L4_FAIR', 'L6_POOR', 'L9_EXTREME']:
+        skr = []
+        for L in L_sweep:
+            skr.append(get_skr(L, **weather_profiles[profile]))
+        plt.semilogy(L_sweep, skr, linewidth=2, label=profile[3:])
+       
     plt.title('Normalized SKR vs Link Distance Under Different Weather Conditions')
     plt.xlabel('Link Distance $L$ (meters)')
     plt.ylabel('Normalized SKR (bits/pulse)')
@@ -359,9 +368,27 @@ def plot_skr_vs_distance():
     plt.legend()
     plt.show()
 
+def plot_max_dist():
+    max_dists = []
+    labels = [] 
+    for profile in weather_profiles:
+        d = get_max_distance(*weather_profiles[profile])
+        max_dists.append(d)
+        labels.append(profile[3:])
+        
+    fig, ax = plt.subplots()
+    bars = ax.bar(labels, max_dists, edgecolor='black', alpha=0.8)
+    ax.set_xticklabels(labels, rotation=45, ha='right')
+    ax.bar_label(bars, padding=3, fmt='%.1f')
+    ax.grid(axis='y', linestyle='--', alpha=0.7)
+    plt.tight_layout()
+    plt.show()
+
 if __name__ == "__main__":
     #print("Generating Figure 2 recreation...")
     #plot_figure_2()
     
     print("Generating SKR vs Distance plot...")
     plot_skr_vs_distance()
+    
+    plot_max_dist()
