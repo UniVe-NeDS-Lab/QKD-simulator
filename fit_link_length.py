@@ -50,7 +50,7 @@ def filter_edges(adj_list_file, max_len, coord_dict, sample_size):
                         coord_dict[int(to)]) < max_len
     
     # remove edges shorter than the threshold
-    if max_len:
+    if max_len < float('inf'):
         g = nx.subgraph_view(g, filter_edge=filter_edge)
     # filter out too small components
     large_components = [g.subgraph(c) for c in nx.connected_components(g)
@@ -151,8 +151,12 @@ def gen_graphs(folder, folder_number, runs=5000, size=30, fname=''):
     components = filter_edges(adj_file, args.max_len, coord_dict, size)
 
     for g in MDRW(components, size, coord_dict, runs):
-        g.graph.update({'scenario':fname, 'max_link_len':args.max_len, 
-                        'weather':args.weather, **weather_profiles[args.weather]})
+        if args.weather not in weather_profiles: 
+            g.graph.update({'scenario':fname, 'max_link_len':args.max_len, 
+                            'weather':args.weather})
+        else:
+            g.graph.update({'scenario':fname, 'max_link_len':args.max_len, 
+                            'weather':args.weather, **weather_profiles[args.weather]})
         g.graph['area'] = compute_area([coord_dict[int(n)] for n in g])
         for frm, to, data in g.edges(data=True):
             data['length'] =  distance(coord_dict[int(frm)], 
@@ -215,8 +219,8 @@ def fit(values, fname, target='length', comments=''):
     
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    profiles = [x for x in weather_profiles.keys()]
-    def_profile = profiles[len(profiles)//2]
+    profiles = [x for x in weather_profiles.keys()] + ["LOS"]
+    def_profile = profiles[len(profiles)//2] 
     
     parser.add_argument('--runs', type=int, default=10000)
     parser.add_argument('--processes', help='number of parallel processes', type=int, default=1)
@@ -237,7 +241,10 @@ if __name__ == '__main__':
     
     
     if not args.max_len:
-        args.max_len = get_max_distance(**weather_profiles[args.weather])
+        if args.weather == 'LOS':
+            args.max_len = float('inf')
+        else:
+            args.max_len = get_max_distance(**weather_profiles[args.weather])
     try:
         os.mkdir(args.results_folder)
     except OSError:
