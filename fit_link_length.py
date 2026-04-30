@@ -26,6 +26,7 @@ suburban_list = ['visibility_graphs/suburban1/',
 urban_list = ['visibility_graphs/urban1/', 'visibility_graphs/urban2/',
                'visibility_graphs/urban3/']
 
+
 def distance(p1, p2):
     x1,y1 = p1
     x2,y2 = p2
@@ -43,6 +44,7 @@ def filter_edges(adj_list_file, max_len, coord_dict, sample_size):
     """ return a list of graphs that are connected components that 
     satisfy a maximum link lenght and a minimum number of nodes """
     g = nx.read_adjlist(adj_list_file, delimiter=',')
+    g = g.to_undirected()
     
     
     def filter_edge(frm, to):
@@ -195,14 +197,12 @@ def fit(values, fname, target='length', comments=''):
         pfile.write(f'# {target}, histogram, cumulative \n')
         y = res['histdata'][0]
         x = res['histdata'][1]
+        bin_width = x[1] - x[0]
         cumsum = 0
         for i in range(len(x)):
-            if not i:
-                cumsum = y[i]*x[i]
-                pfile.write(f'{x[i]} {y[i]} {cumsum}\n')
-            else:
-                cumsum += y[i]*(x[i]-x[i-1])
-                pfile.write(f'{x[i]} {cumsum}\n')
+            cumsum += y[i]*bin_width
+            pfile.write(f'{x[i]:.8f}\t{y[i]:.8f}\t{cumsum:.8f}\n')
+            print(cumsum, " ", end='')
         pfile.write('\n\n')
         # add some initial x values to make all the fitted curves start from 10
         x = list(range(10,int(x[0]),20)) + list(res['histdata'][1])
@@ -213,7 +213,7 @@ def fit(values, fname, target='length', comments=''):
                     f'{res["model"]["params"]} '
                     f'mean={res["model"]["model"].mean()}\n')
         for i in range(len(x)):
-            pfile.write(f'{x[i]} {func(x[i])} \n')
+            pfile.write(f'{x[i]:.8f}\t{func(x[i]):.8f} \n')
         
         pfile.write('\n\n')
     
@@ -237,7 +237,6 @@ if __name__ == '__main__':
     parser.add_argument('--weather', choices=profiles, default=def_profile)
  
     args = parser.parse_args()
-    
     
     
     if not args.max_len:
@@ -283,11 +282,6 @@ if __name__ == '__main__':
             p = multiprocessing.Process(target=fit, args=(edges, area, 'length', comments))
             p.start()
             fit_processes.append(p)
-            # get the rate in Mb/s
-            #rates = [fso.get_rate(x, args.gen_rate)[3]/1_000_000 for x in edges if x>0]
-            #p = multiprocessing.Process(target=fit, args=(rates, area, 'rate', comments+'-'+str(args.gen_rate)))
-            #p.start()
-            #fit_processes.append(p)
 
     else:
         for area in [rural_list, suburban_list, urban_list]:

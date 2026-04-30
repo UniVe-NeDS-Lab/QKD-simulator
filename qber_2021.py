@@ -65,6 +65,11 @@ weather_profiles = {
     }
 }
 
+cluster_colors = [
+        '#006400', '#228B22', '#90EE90',  # Sfumature verde
+        '#FFD700', '#FFA500', '#FF8C00',   # Sfumature arancio/giallo
+        '#FF6B6B', '#DC143C', '#8B0000'   # Sfumature rosso
+    ]
 
 
 
@@ -319,12 +324,13 @@ def plot_skr_vs_distance():
     L_sweep = np.linspace(100, 5000, 50) 
     
     plt.figure(figsize=(9, 6))
-    
+    i = 0 
     for profile in weather_profiles: #['L0_OPTIMAL','L2_VERY_GOOD', 'L4_FAIR', 'L6_POOR', 'L9_EXTREME']:
         skr = []
         for L in L_sweep:
             skr.append(get_skr(L, **weather_profiles[profile]))
-        plt.semilogy(L_sweep, skr, linewidth=2, label=profile[3:])
+        plt.semilogy(L_sweep, skr, linewidth=2, label=profile[3:], color=cluster_colors[i])
+        i+=1
        
     plt.title('Normalized SKR vs Link Distance Under Different Weather Conditions')
     plt.xlabel('Link Distance $L$ (meters)')
@@ -336,7 +342,61 @@ def plot_skr_vs_distance():
     plt.legend()
     plt.show()
 
+import matplotlib.pyplot as plt
+import numpy as np
+
+import matplotlib.pyplot as plt
+import numpy as np
+
 def plot_max_dist():
+    max_dists = []
+    labels = [] 
+    for profile in weather_profiles:
+        d = get_max_distance(**weather_profiles[profile])
+        max_dists.append(d)
+        labels.append(profile[3:])
+        
+    n_bars = len(max_dists)
+    group_size = 3
+    x_positions = []
+    current_x = 0
+    
+    for i in range(n_bars):
+        if i > 0 and i % group_size == 0:
+            current_x += 1.5  # Aumentato leggermente il gap tra i cluster
+        x_positions.append(current_x)
+        current_x += 1.0
+
+    # --- Palette di colori (Sfumature per ogni cluster) ---
+    # GOOD: Forest Green -> Lime Green -> Pale Green
+    # AVG:  Dark Orange -> Orange -> Yellow
+    # BAD:  Dark Red -> Crimson -> Pinkish Red
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+    
+    bars = ax.bar(x_positions, max_dists, color=cluster_colors, edgecolor='black', alpha=0.9, width=0.8)
+    
+    # Formattazione asse X
+    ax.set_xticks(x_positions)
+    ax.set_xticklabels(labels, rotation=45, ha='right', fontsize=10)
+    
+    # Etichette sopra le barre
+    ax.bar_label(bars, padding=5, fmt='%.1f', fontweight='bold')
+    
+
+    # Pulizia estetica
+    ax.set_ylabel("Distance [m]", fontsize=12)
+    ax.set_title("Max Transmission Distance per Weather Profile", fontsize=15, pad=20)
+    ax.grid(axis='y', linestyle=':', alpha=0.6)
+    
+    # Rimuove i bordi superflui per un look moderno
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+
+    plt.tight_layout()
+    plt.show()
+
+def plot_max_dist_old():
     max_dists = []
     labels = [] 
     for profile in weather_profiles:
