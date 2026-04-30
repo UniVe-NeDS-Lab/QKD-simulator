@@ -17,29 +17,6 @@ from scipy.optimize import root_scalar
 
 # weather conditions parameters
 
-weather_profiles_small = {
-    'GOOD': {
-        'V': 20.0,    # clear visibility
-        'rain': 0.0,  # no rain
-        'Cn2': 1e-17  # zero turbulence
-    },
-    'AVG': {
-        'V': 10.0,    # light haze
-        'rain': 10.0, # light rain
-        'Cn2': 1e-15  # some turbulence
-    },
-    'BAD': {
-        'V': 4.0,     # heavy haze
-        'rain': 20.0, # heavy rain
-        'Cn2': 1e-14  # turbulence
-    },
-    'EXTREME': {      
-        'V': 0.6,     # thick fog
-        'rain': 50.0, # extreme rain
-        'Cn2': 1e-13  # heavy turbulence
-    }
-}
-
 weather_profiles = {
     'L0_OPTIMAL': {
         'V': 50.0,    # Exceptionally clear sky
@@ -58,53 +35,37 @@ weather_profiles = {
     },
     'L3_GOOD': {
         'V': 10.0,    # Clear
-        'rain': 0.0,  # No precipitation
+        'rain': 0.2,  # Almost no precipitation
         'Cn2': 1e-16  # Weak turbulence
     },
-    'L4_FAIR': {
+    'L4_MODERATE': {
         'V': 8.0,     # Light haze
-        'rain': 2.0,  # Light drizzle
+        'rain': 1.2,  # Light precipitation
         'Cn2': 5e-16  # Weak-to-moderate turbulence
     },
-    'L5_MODERATE': {
+    'L5_POOR': {
         'V': 5.0,     # Haze
-        'rain': 5.0,  # Moderate rain
+        'rain': 2.0,  # Light rain
         'Cn2': 1e-15  # Moderate turbulence
     },
-    'L6_POOR': {
+    'L6_BAD': {
         'V': 3.0,     # Heavy haze
-        'rain': 10.0, # Steady rain
+        'rain': 5.0,  # Steady rain
         'Cn2': 5e-15  # Moderate-to-strong turbulence
     },
-    'L7_BAD': {
-        'V': 1.5,     # Thin fog
-        'rain': 20.0, # Heavy rain
+    'L7_SEVERE': {
+        'V': 1,       # Fog
+        'rain': 15.0, # Heavy rain
         'Cn2': 1e-14  # Strong turbulence
     },
-    'L8_SEVERE': {
-        'V': 0.8,     # Light fog
-        'rain': 30.0, # Violent rain showers
-        'Cn2': 5e-14  # Very strong turbulence
-    },
-    'L9_EXTREME': {
+    'L8_EXTREME': {
         'V': 0.4,     # Thick fog
-        'rain': 50.0, # Severe storm
+        'rain': 30.0, # Violent rain showers
         'Cn2': 1e-13  # Heavy turbulence
     }
 }
 
-weather_mapping = {
-    3500: 'L0_OPTIMAL',
-    3400: 'L1_EXCELLENT',
-    3300: 'L2_VERY_GOOD',
-    3100: 'L3_GOOD',
-    2000: 'L4_FAIR',
-    1500: 'L5_MODERATE',
-    1100: 'L6_POOR',
-    700: 'L7_BAD',
-    400: 'L8_SEVERE',
-    200: 'L9_EXTREME'
-}
+
 
 
 class NtanosFSO_QKD:
@@ -310,13 +271,20 @@ def get_skr(L, A_add=None, V=50.0, rain=0.0, Cn2=1e-17, p_outage=0.01):
 def get_max_distance(V, rain, Cn2):
     """ Return the maximum distance at which we have a reasonable SKR 
     given certain weather conditions """
-    L = 100
+    from model import default_values
+    print(V, rain, Cn2)
+    # This is the minimum SKR needed for a single path, swe don't consider
+    # multipath so a link that does not provide at least the load needed
+    # for one flow between the endpoints is useless.  
+    min_skr = 2*default_values['key_size']*default_values['traffic_demand']*1e6/\
+        (default_values['rekey_interval']*8e9*default_values['gen_rate'])
+    print(min_skr)
+    L = 10
     while True:    
         skr = get_skr(L, V=V, rain=rain, Cn2=Cn2)
-        if skr < 10**(-9): # we assume GHz generation of photons, so 
-                           # if SKR is < 1/s the link is unusable
-            return L-100
-        L += 100
+        if skr < min_skr: 
+            return L-10
+        L += 10
 
 # =====================================================================
 # PLOTTING FUNCTIONS
@@ -372,11 +340,13 @@ def plot_max_dist():
     max_dists = []
     labels = [] 
     for profile in weather_profiles:
-        d = get_max_distance(*weather_profiles[profile])
+        d = get_max_distance(**weather_profiles[profile])
         max_dists.append(d)
         labels.append(profile[3:])
         
     fig, ax = plt.subplots()
+    for x in max_dists:
+        print(f'"{x}" {x}, ', end='')
     bars = ax.bar(labels, max_dists, edgecolor='black', alpha=0.8)
     ax.set_xticklabels(labels, rotation=45, ha='right')
     ax.bar_label(bars, padding=3, fmt='%.1f')
@@ -384,10 +354,14 @@ def plot_max_dist():
     plt.tight_layout()
     plt.show()
 
+def get_weather_mapping():
+    return { get_max_distance(**weather_profiles[profile]): profile for profile in weather_profiles}
+
+
 if __name__ == "__main__":
     #print("Generating Figure 2 recreation...")
     #plot_figure_2()
-    
+
     print("Generating SKR vs Distance plot...")
     plot_skr_vs_distance()
     

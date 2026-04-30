@@ -15,7 +15,7 @@ from collections import defaultdict
 import pandas as pd
 from tqdm.contrib import itertools as tqiter
 import os
-from qber_2021 import weather_profiles, weather_mapping
+from qber_2021 import weather_profiles, get_weather_mapping
 
 import matplotlib.pyplot as plt
 from matplotlib import rc
@@ -165,7 +165,8 @@ def psi(s, d, rhos, lambdas, g, skr_string):
 
 def path_length_statistics(g):
     
-    link_weight = 'SKR-' + weather_mapping[g.graph['max_link_len']]
+
+    link_weight = 'SKR-' + get_weather_mapping()[g.graph['max_link_len']]
     
     all_paths = dict(nx.all_pairs_all_shortest_paths(g, weight=link_weight))
 
@@ -445,7 +446,14 @@ def compute_lambda(dem=100):
                                 # by the gen_rate 
     return lbd
 
-    
+
+default_values =    {
+    'gen_rate': 1_000_000_000, # Hz
+    'traffic_demand': 40000,   # Mb/s
+    'rekey_interval': 100,     # GB
+    'key_size': 256            # b
+}
+
 if __name__ == '__main__':
     """ graph g is expected to have a link attribute 'SKR' that contains 
     the secrete key rate. While lambda[(n,m)] is the traffic intensity 
@@ -459,13 +467,13 @@ if __name__ == '__main__':
                         nargs='+', required=True)
     #parser.add_argument('--lbd', help='Traffic intensity (lambda), in Mb/s', 
     #                    type=float, default=1, nargs='+')
-    parser.add_argument('--gen_rate', type=int, default=1_000_000_000)
-    parser.add_argument('--traffic_demand', type=int, default=[100],
+    parser.add_argument('--gen_rate', type=int, default=default_values['gen_rate'])
+    parser.add_argument('--traffic_demand', type=int, default=[default_values['traffic_demand']],
                         help="The actual traffic demand between every couple "
                         "of nodes (Mb/s). List is supported", nargs='+')
-    parser.add_argument('--rekey_interval', type=float, default=100,
+    parser.add_argument('--rekey_interval', type=float, default=default_values['rekey_interval'],
                         help="The interval between rekeys (GB).")
-    parser.add_argument('--key_size', type=int, default=256)
+    parser.add_argument('--key_size', type=int, default=default_values['key_size'])
     parser.add_argument('--processes', help='number of parallel processes', 
                         type=int, default=1)
     parser.add_argument('--save_to', help='dump the dataframe to a file')
