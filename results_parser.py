@@ -35,14 +35,19 @@ def plot_len_stats(flist):
     subset_labels = ['L0_OPTIMAL', 'L4_MODERATE', 'L8_EXTREME']
     wmap = get_weather_mapping().items()
     subset_len = []
+    metrics = ['Averge Path Length (m)', 'Covered Area (sq. m)', 'degree', 'effective_degree']
+    csv_metric_names = ['PathLength', 'CoveredArea', 'Degree', 'EffDegree']
     for v, k in wmap:
         if k in subset_labels:
             subset_len.append(v) 
     # 4. Loop through and plot using plain Matplotlib
-    for idx, label in enumerate(['Averge Path Length (m)', 'Covered Area (sq. m)', 'degree', 'effective_degree']):
-        for i, area in enumerate(scenarios):
+    for i, area in enumerate(scenarios):
+        area_csv_data = {ll: {} for ll in subset_len}
+        for idx, label in enumerate(metrics):
             ax = axes[idx][i]
             lines = []
+            
+            
             for link_len in subset_len:
                 
                 # Filter the pre-calculated stats for the current scenario
@@ -53,6 +58,12 @@ def plot_len_stats(flist):
                 y_means = subset['mean']
                 y_errors = subset['std']
                 
+                if 'size' not in area_csv_data[link_len]:
+                    area_csv_data[link_len]['size'] = x_sizes
+                m_name = csv_metric_names[idx]
+                area_csv_data[link_len][f'{m_name}'] = y_means
+                area_csv_data[link_len][f'{m_name}_std'] = y_errors
+
                 # Plot using Matplotlib's errorbar function
                 line = ax.errorbar(
                     x_sizes, 
@@ -78,6 +89,14 @@ def plot_len_stats(flist):
             
             # Force X-axis to only show integer ticks (since network size is discrete)
             ax.set_xticks(x_sizes.unique())
+        for link_len in subset_len:
+            weather_label = get_weather_mapping()[link_len]
+            filename = f"/tmp/stats-{area}-{weather_label}.csv"
+        
+            # Creiamo il DataFrame dal dizionario accumulato e salviamo
+            df_export = pd.DataFrame(area_csv_data[link_len])
+            df_export.to_csv(filename, index=False)
+            print(f"Salvataggio completato: {filename}")    
     fig.legend(lines, subset_labels, loc='lower center', ncol=len(subset_labels), 
            bbox_to_anchor=(0.5, 0.02), title="Weather Conditions")
 
